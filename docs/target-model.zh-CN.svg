@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="560" viewBox="0 0 1280 560" role="img" aria-labelledby="title desc">
+  <title id="title">执行目标模型</title>
+  <desc id="desc">解释 ALL REPOS 会在所有仓库执行命令，而单个仓库行只在该仓库执行命令。</desc>
+  <defs><style>.sans{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}.mono{font-family:SFMono-Regular,Menlo,Consolas,"PingFang SC",monospace}</style></defs>
+  <rect width="1280" height="560" fill="#07111a"/>
+  <text x="64" y="66" class="sans" font-size="34" font-weight="800" fill="#e6edf3">两个执行目标，一个输入框</text>
+  <text x="64" y="98" class="sans" font-size="17" fill="#9fb3c8">第一行 ALL REPOS 是真实的操作目标：选中它，就对整个工作区执行。</text>
+
+  <rect x="84" y="142" width="460" height="340" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+  <text x="116" y="184" class="sans" font-size="22" font-weight="800" fill="#7ee787">ALL REPOS</text>
+  <rect x="116" y="218" width="396" height="54" rx="8" fill="#2f6f95"/>
+  <text x="142" y="252" class="mono" font-size="18" font-weight="800" fill="#fff">ALL REPOS</text>
+  <text x="340" y="252" class="mono" font-size="18" font-weight="800" fill="#fff">ALL</text>
+  <text x="116" y="318" class="mono" font-size="17" fill="#e6edf3">ALL shell &gt; git push</text>
+  <text x="116" y="362" class="sans" font-size="17" fill="#9fb3c8">依次在 api、web、auth 以及其他所有仓库执行。</text>
+  <text x="116" y="410" class="sans" font-size="16" fill="#8b949e">适合 status、pull、push、test、build 等明确要覆盖所有仓库的命令。</text>
+
+  <rect x="736" y="142" width="460" height="340" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+  <text x="768" y="184" class="sans" font-size="22" font-weight="800" fill="#9ecbff">单个仓库</text>
+  <rect x="768" y="218" width="396" height="54" rx="8" fill="#18364a"/>
+  <text x="794" y="252" class="mono" font-size="18" font-weight="800" fill="#fff">api</text>
+  <text x="940" y="252" class="mono" font-size="18" font-weight="800" fill="#7ee787">main</text>
+  <text x="768" y="318" class="mono" font-size="17" fill="#e6edf3">api@main shell &gt; pnpm test</text>
+  <text x="768" y="362" class="sans" font-size="17" fill="#9fb3c8">只在 api 仓库执行。</text>
+  <text x="768" y="410" class="sans" font-size="16" fill="#8b949e">适合单仓库调试、测试、切分支和本地命令。</text>
+
+  <path d="M582 312 C636 312 636 312 696 312" stroke="#7ee787" stroke-width="4" stroke-dasharray="8 10"/>
+  <text x="640" y="296" text-anchor="middle" class="mono" font-size="15" fill="#7ee787">Tab</text>
+</svg>

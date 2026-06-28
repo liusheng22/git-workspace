@@ -1,0 +1,36 @@
+workspace:
+  root: .
+  ignore:
+    - node_modules
+    - .cache
+    - dist
+
+repos:
+  api:
+    path: ./api
+    default: main
+  web:
+    path: ./web
+    default: dev
+
+profiles:
+  daily:
+    api: main
+    web: dev
+    "*": main
+
+  release-check:
+    "*": main
+
+aliases:
+  gco: checkout
+  gcb: checkout -b
+  gl: pull
+  gp: push
+
+exec:
+  defaultMode: shell
+  gitShortcuts: true
+  shell:
+    interactive: true
+

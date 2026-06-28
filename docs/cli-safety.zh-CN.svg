@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="560" viewBox="0 0 1280 560" role="img" aria-labelledby="title desc">
+  <title id="title">CLI 安全工作流</title>
+  <desc id="desc">展示先 plan 再执行 pull、switch、sync 的安全工作流。</desc>
+  <defs><style>.sans{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}.mono{font-family:SFMono-Regular,Menlo,Consolas,"PingFang SC",monospace}</style></defs>
+  <rect width="1280" height="560" fill="#07111a"/>
+  <text x="64" y="66" class="sans" font-size="34" font-weight="800" fill="#e6edf3">批量 Git 操作前先看计划</text>
+  <text x="64" y="98" class="sans" font-size="17" fill="#9fb3c8">TUI 的 ALL 像多仓库终端；CLI 的 plan / pull / sync 会检查分支和脏状态。</text>
+
+  <rect x="78" y="150" width="1124" height="78" rx="12" fill="#0e1f2d" stroke="#315a73"/>
+  <text x="112" y="199" class="mono" font-size="22" font-weight="800" fill="#7ee787">gws plan daily</text>
+  <text x="334" y="199" class="sans" font-size="18" fill="#d7e0ea">先看每个仓库的目标分支、脏状态和计划动作</text>
+
+  <rect x="112" y="286" width="300" height="150" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+  <text x="144" y="332" class="mono" font-size="20" font-weight="800" fill="#7ee787">gws pull</text>
+  <text x="144" y="366" class="sans" font-size="16" fill="#d7e0ea">只拉取已经在目标分支上的仓库。</text>
+  <text x="144" y="400" class="sans" font-size="15" fill="#8b949e">脏工作区或分支不匹配会跳过。</text>
+
+  <rect x="490" y="286" width="300" height="150" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+  <text x="522" y="332" class="mono" font-size="20" font-weight="800" fill="#7ee787">gws switch</text>
+  <text x="522" y="366" class="sans" font-size="16" fill="#d7e0ea">切到 profile 里的目标分支。</text>
+  <text x="522" y="400" class="sans" font-size="15" fill="#8b949e">脏工作区会阻止切分支。</text>
+
+  <rect x="868" y="286" width="300" height="150" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+  <text x="900" y="332" class="mono" font-size="20" font-weight="800" fill="#7ee787">gws sync</text>
+  <text x="900" y="366" class="sans" font-size="16" fill="#d7e0ea">先切目标分支，再安全拉取。</text>
+  <text x="900" y="400" class="sans" font-size="15" fill="#8b949e">适合日常同步整个工作区。</text>
+</svg>

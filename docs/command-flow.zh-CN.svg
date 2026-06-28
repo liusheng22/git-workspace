@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="520" viewBox="0 0 1280 520" role="img" aria-labelledby="title desc">
+  <title id="title">命令执行流</title>
+  <desc id="desc">展示命令从选择目标、输入、解析模式到输出到连续日志的流程。</desc>
+  <defs><style>.sans{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}.mono{font-family:SFMono-Regular,Menlo,Consolas,"PingFang SC",monospace}</style></defs>
+  <rect width="1280" height="520" fill="#07111a"/>
+  <text x="64" y="66" class="sans" font-size="34" font-weight="800" fill="#e6edf3">命令是怎么执行的</text>
+  <text x="64" y="98" class="sans" font-size="17" fill="#9fb3c8">不会跳到结果页。输出留在同一个日志区，输入框继续可用。</text>
+
+  <g class="sans" font-size="18" font-weight="800">
+    <rect x="70" y="162" width="210" height="110" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+    <text x="100" y="207" fill="#7ee787">1. 选择目标</text>
+    <text x="100" y="237" class="mono" font-size="15" font-weight="500" fill="#d7e0ea">ALL 或单仓库</text>
+
+    <rect x="340" y="162" width="210" height="110" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+    <text x="370" y="207" fill="#7ee787">2. 输入一次</text>
+    <text x="370" y="237" class="mono" font-size="15" font-weight="500" fill="#d7e0ea">git status -sb</text>
+
+    <rect x="610" y="162" width="210" height="110" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+    <text x="640" y="207" fill="#7ee787">3. 解析模式</text>
+    <text x="640" y="237" class="mono" font-size="15" font-weight="500" fill="#d7e0ea">shell 或 git</text>
+
+    <rect x="880" y="162" width="270" height="110" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+    <text x="910" y="207" fill="#7ee787">4. 输出日志</text>
+    <text x="910" y="237" class="mono" font-size="15" font-weight="500" fill="#d7e0ea">同一日志，同一输入框</text>
+  </g>
+
+  <g stroke="#7ee787" stroke-width="4" stroke-linecap="round" fill="none">
+    <path d="M286 217 H330"/><path d="M316 202 L332 217 L316 232"/>
+    <path d="M556 217 H600"/><path d="M586 202 L602 217 L586 232"/>
+    <path d="M826 217 H870"/><path d="M856 202 L872 217 L856 232"/>
+  </g>
+
+  <rect x="210" y="342" width="860" height="70" rx="10" fill="#102638" stroke="#315a73"/>
+  <text x="244" y="386" class="mono" font-size="20" font-weight="800" fill="#7ee787">ALL shell &gt;</text>
+  <text x="390" y="386" class="mono" font-size="20" fill="#e6edf3">git status -sb</text>
+  <text x="734" y="386" class="mono" font-size="16" fill="#8b949e">Ctrl+C 取消当前命令</text>
+</svg>

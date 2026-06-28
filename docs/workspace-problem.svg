@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="520" viewBox="0 0 1280 520" role="img" aria-labelledby="title desc">
+  <title id="title">Why Git Workspace exists</title>
+  <desc id="desc">Shows the difference between repeating cd commands across repositories and using one Git Workspace TUI.</desc>
+  <defs>
+    <style>
+      .sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      .mono{font-family:SFMono-Regular,Menlo,Consolas,monospace}
+    </style>
+  </defs>
+  <rect width="1280" height="520" fill="#07111a"/>
+  <text x="64" y="66" class="sans" font-size="34" font-weight="800" fill="#e6edf3">Many repos, one working surface</text>
+  <text x="64" y="98" class="sans" font-size="17" fill="#9fb3c8">Git Workspace removes repeated cd / status / pull / push loops.</text>
+
+  <rect x="64" y="136" width="520" height="310" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+  <text x="96" y="178" class="sans" font-size="22" font-weight="800" fill="#ff7b72">Before</text>
+  <text x="96" y="214" class="mono" font-size="17" fill="#d7e0ea">cd api        &amp;&amp; git status -sb</text>
+  <text x="96" y="250" class="mono" font-size="17" fill="#d7e0ea">cd ../web     &amp;&amp; git status -sb</text>
+  <text x="96" y="286" class="mono" font-size="17" fill="#d7e0ea">cd ../auth    &amp;&amp; git status -sb</text>
+  <text x="96" y="322" class="mono" font-size="17" fill="#d7e0ea">cd ../gateway &amp;&amp; git status -sb</text>
+  <text x="96" y="372" class="sans" font-size="17" fill="#8b949e">Context switching grows with every repo.</text>
+
+  <path d="M618 291 L662 291" stroke="#7ee787" stroke-width="5" stroke-linecap="round"/>
+  <path d="M646 272 L668 291 L646 310" fill="none" stroke="#7ee787" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="696" y="136" width="520" height="310" rx="14" fill="#0e1f2d" stroke="#315a73"/>
+  <text x="728" y="178" class="sans" font-size="22" font-weight="800" fill="#7ee787">With gws</text>
+  <rect x="728" y="206" width="424" height="54" rx="8" fill="#102638" stroke="#315a73"/>
+  <text x="750" y="240" class="mono" font-size="18" font-weight="800" fill="#7ee787">ALL shell &gt;</text>
+  <text x="872" y="240" class="mono" font-size="18" fill="#e6edf3">git status -sb</text>
+  <g class="mono" font-size="16">
+    <text x="748" y="302" fill="#9ecbff">api</text><text x="840" y="302" fill="#7ee787">main</text><text x="932" y="302" fill="#7ee787">clean</text>
+    <text x="748" y="338" fill="#9ecbff">web</text><text x="840" y="338" fill="#ffa657">dev</text><text x="932" y="338" fill="#ff7b72">dirty:1</text>
+    <text x="748" y="374" fill="#9ecbff">auth</text><text x="840" y="374" fill="#7ee787">main</text><text x="932" y="374" fill="#7ee787">clean</text>
+  </g>
+  <text x="728" y="420" class="sans" font-size="17" fill="#8b949e">One command can run across every repo, while output stays readable.</text>
+</svg>
