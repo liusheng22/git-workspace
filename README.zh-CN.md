@@ -178,6 +178,8 @@ exec:
 
 ## 安装方式
 
+PyPI 包名是 `git-workspace-tui`。安装后提供的命令是 `gws` 和 `g`。
+
 使用 `uv`：
 
 ```bash
@@ -188,6 +190,24 @@ uv tool install git-workspace-tui
 
 ```bash
 pipx install git-workspace-tui
+```
+
+升级已有安装：
+
+```bash
+uv tool upgrade git-workspace-tui
+```
+
+如果你用 `pipx` 安装：
+
+```bash
+pipx upgrade git-workspace-tui
+```
+
+安装指定 PyPI 版本：
+
+```bash
+uv tool install 'git-workspace-tui==0.1.0'
 ```
 
 从 GitHub 安装固定版本：
@@ -235,5 +255,25 @@ uv run pytest
 uv run ruff check .
 uv run python -m build
 ```
+
+## 发布流程
+
+版本发布由 GitHub Actions 处理：推送版本 tag 后自动发布到 PyPI。
+
+```bash
+# 更新 pyproject.toml、uv.lock、CHANGELOG.md 和文档后
+uv lock
+uv run ruff check .
+uv run pytest
+uv run python -m build
+git commit -am "chore: release vX.Y.Z"
+git push origin main
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+发布工作流使用 PyPI Trusted Publishing，配置为仓库 `liusheng22/git-workspace`、workflow `publish.yml`、environment `pypi`。PyPI 版本不可覆盖；如果发错版本，只能修复后发布新版本。
+
+完整维护者清单见 [docs/releasing.zh-CN.md](docs/releasing.zh-CN.md)。
 
 当前主要支持 macOS 和 Linux。

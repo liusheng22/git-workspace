@@ -178,6 +178,8 @@ Use `workspace.local.yml` for machine-specific overrides. It should usually stay
 
 ## Install Options
 
+The PyPI package name is `git-workspace-tui`. The installed commands are `gws` and `g`.
+
 With `uv`:
 
 ```bash
@@ -188,6 +190,24 @@ With `pipx`:
 
 ```bash
 pipx install git-workspace-tui
+```
+
+Upgrade an existing install:
+
+```bash
+uv tool upgrade git-workspace-tui
+```
+
+If you installed with `pipx`:
+
+```bash
+pipx upgrade git-workspace-tui
+```
+
+Install a specific PyPI version:
+
+```bash
+uv tool install 'git-workspace-tui==0.1.0'
 ```
 
 Install a fixed version from GitHub:
@@ -235,5 +255,25 @@ uv run pytest
 uv run ruff check .
 uv run python -m build
 ```
+
+## Release Process
+
+Releases are published to PyPI by GitHub Actions when a version tag is pushed.
+
+```bash
+# after updating pyproject.toml, uv.lock, CHANGELOG.md, and docs
+uv lock
+uv run ruff check .
+uv run pytest
+uv run python -m build
+git commit -am "chore: release vX.Y.Z"
+git push origin main
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+The publish workflow uses PyPI Trusted Publishing with repository `liusheng22/git-workspace`, workflow `publish.yml`, and environment `pypi`. PyPI versions are immutable, so a failed or incorrect release must be fixed by publishing a new version.
+
+See [docs/releasing.md](docs/releasing.md) for the full maintainer checklist.
 
 Git Workspace currently targets macOS and Linux.
