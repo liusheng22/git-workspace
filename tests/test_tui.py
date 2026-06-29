@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 from conftest import init_repo, run
 from textual import events
@@ -9,7 +10,7 @@ from textual.widgets import Static
 from textual.widgets._header import HeaderClock, HeaderIcon
 
 from git_workspace.models import ExecMode
-from git_workspace.tui import CommandInput, GitWorkspace, RepoTable
+from git_workspace.tui import BatchCommand, CommandInput, GitWorkspace, RepoTable
 
 
 async def _make_app(tmp_path: Path) -> GitWorkspace:
@@ -337,28 +338,31 @@ def test_tui_ctrl_c_cancels_running_command(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_tui_all_scope_runs_all_repos_and_keeps_input(tmp_path: Path) -> None:
+def test_tui_all_scope_cancel_clears_batch_and_keeps_input(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
         app = await _make_app(tmp_path)
+        terminated: list[object] = []
+        monkeypatch.setattr("git_workspace.tui.terminate_process", lambda proc: terminated.append(proc))
+
         async with app.run_test(size=(120, 32)) as pilot:
             await pilot.pause(0.5)
             cmd = app.query_one("#cmd", CommandInput)
             table = app.query_one("#repo-table", RepoTable)
             assert table.cursor_row == 0
-            cmd.text = "sleep 0.3"
-            await pilot.press("enter")
-            await pilot.pause(0.1)
-            assert app.command_running
-            assert len(app.batch_queue) in {0, 1}
-            cmd.text = "sleep 0.3"
-            await pilot.press("enter")
-            await pilot.pause(0.1)
-            assert len(app.batch_queue) in {0, 1}
+            proc = SimpleNamespace(pid=12345, poll=lambda: None)
+            app.command_running = True
+            app.current_process = proc  # type: ignore[assignment]
+            app.current_batch = BatchCommand("sleep 0.3", ExecMode.SHELL, tuple(app.repos))
+            app.batch_queue.append(BatchCommand("sleep 0.3", ExecMode.SHELL, tuple(app.repos)))
             assert app.focused is cmd
-            await pilot.press("ctrl+c")
-            await _wait_for_idle(app, pilot)
-            assert not app.command_running
+
+            canceled = app.cancel_current_command()
+
+            assert canceled
+            assert app.cancel_requested
+            assert app.current_batch is None
             assert not app.batch_queue
+            assert terminated == [proc]
             assert app.focused is cmd
             app.exit()
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Stabilizes the TUI all-repository cancellation test on Linux CI while keeping the 0.1.2 cancellation behavior.
+
 ## 0.1.2
 
 - Adds a hard-kill fallback when canceling TUI commands so shell wrappers cannot leave the TUI stuck in a running state.
