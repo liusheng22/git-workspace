@@ -10,6 +10,8 @@ from pathlib import Path
 from .git import git_aliases
 from .models import ExecMode, Repo, WorkspaceConfig
 
+SHELL_STARTUP_ENV = ("BASH_ENV", "ENV")
+
 BUILTIN_GIT_ALIASES: dict[str, str] = {
     "g": "status -sb",
     "gs": "status -sb",
@@ -57,12 +59,15 @@ def shell_program() -> str:
 
 
 def _source_if_readable(path: str) -> str:
-    return f'[ -r "{path}" ] && . "{path}" >/dev/null 2>&1 || true'
+    return f'[ -r "{path}" ] && __gws_source_rc "{path}" || true'
 
 
 def _posix_shell_script(command: str, shell_name: str) -> str:
     rc_files: tuple[str, ...]
-    prelude: list[str] = ["set +e"]
+    prelude: list[str] = [
+        "set +e",
+        "__gws_source_rc() { exit() { return ${1:-0}; }; . \"$1\" >/dev/null 2>&1; unset -f exit >/dev/null 2>&1 || true; }",
+    ]
     if shell_name == "zsh":
         prelude.append("setopt aliases >/dev/null 2>&1 || true")
         rc_files = ("$HOME/.zshenv", "$HOME/.zprofile", "$HOME/.zshrc")
@@ -81,18 +86,24 @@ def _posix_shell_script(command: str, shell_name: str) -> str:
     return "\n".join(lines)
 
 
-def shell_invocation(command: str, interactive: bool = True) -> list[str]:
+def shell_invocation(command: str, load_rc: bool = False) -> list[str]:
     shell = shell_program()
     name = Path(shell).name
-    if interactive and name in {"bash", "zsh", "ksh"}:
+    if load_rc and name in {"bash", "zsh", "ksh"}:
         flag = "-fc" if name == "zsh" else "-c"
         return [shell, flag, _posix_shell_script(command, name)]
-    if interactive and name == "fish":
+    if load_rc and name == "fish":
         return [shell, "-ic", command]
-    return [shell, "-lc", command]
+    if name == "bash":
+        return [shell, "--noprofile", "--norc", "-c", command]
+    if name == "zsh":
+        return [shell, "-f", "-c", command]
+    if name == "fish":
+        return [shell, "--no-config", "-c", command]
+    return [shell, "-c", command]
 
 
-def command_exists_in_shell(command: str, cwd: Path, interactive: bool = True) -> bool:
+def command_exists_in_shell(command: str, cwd: Path, load_rc: bool = False) -> bool:
     try:
         parts = shlex.split(command)
     except ValueError:
@@ -105,8 +116,9 @@ def command_exists_in_shell(command: str, cwd: Path, interactive: bool = True) -
     probe = f"type {shlex.quote(head)} >/dev/null 2>&1"
     try:
         proc = subprocess.run(
-            shell_invocation(probe, interactive=interactive),
+            shell_invocation(probe, load_rc=load_rc),
             cwd=str(cwd),
+            env=process_env(load_shell_rc=load_rc),
             text=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -147,24 +159,27 @@ def resolve_command(
     repo: Repo,
     config: WorkspaceConfig,
     mode: ExecMode,
+    load_shell_rc: bool | None = None,
 ) -> ResolvedCommand | None:
     value = value.strip()
     if not value:
         return None
 
-    interactive = config.exec_settings.interactive_shell
+    load_rc = config.exec_settings.load_shell_rc
+    if load_rc is None:
+        load_rc = bool(load_shell_rc)
 
     if value.startswith("!"):
         command = value[1:].strip()
         if not command:
             return None
-        return ResolvedCommand(value, shell_invocation(command, interactive), repo.path, True)
+        return ResolvedCommand(value, shell_invocation(command, load_rc=load_rc), repo.path, True)
 
     if mode == ExecMode.SHELL:
-        if command_exists_in_shell(value, repo.path, interactive):
-            return ResolvedCommand(value, shell_invocation(value, interactive), repo.path, True)
+        if command_exists_in_shell(value, repo.path, load_rc=load_rc):
+            return ResolvedCommand(value, shell_invocation(value, load_rc=load_rc), repo.path, True)
         if not config.exec_settings.git_shortcuts:
-            return ResolvedCommand(value, shell_invocation(value, interactive), repo.path, True)
+            return ResolvedCommand(value, shell_invocation(value, load_rc=load_rc), repo.path, True)
 
     aliases = aliases_for_repo(config, repo)
     command, expanded = expand_git_alias(value, aliases)
@@ -183,8 +198,10 @@ def resolve_command(
     )
 
 
-def process_env() -> dict[str, str]:
+def process_env(load_shell_rc: bool = False) -> dict[str, str]:
     env = os.environ.copy()
+    for name in SHELL_STARTUP_ENV:
+        env.pop(name, None)
     term = os.environ.get("TERM") or "xterm-256color"
     if term == "dumb":
         term = "xterm-256color"

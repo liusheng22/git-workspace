@@ -93,10 +93,15 @@ def _normalize_exec(value: Any) -> ExecSettings:
     mode = str(raw.get("defaultMode", raw.get("default_mode", "shell"))).lower()
     default_mode = ExecMode.GIT if mode == "git" else ExecMode.SHELL
     shell = _as_mapping(raw.get("shell"), "exec.shell")
+    load_shell_rc: bool | None = None
+    if "loadRc" in shell:
+        load_shell_rc = bool(shell["loadRc"])
+    elif "load_rc" in shell:
+        load_shell_rc = bool(shell["load_rc"])
     return ExecSettings(
         default_mode=default_mode,
         git_shortcuts=bool(raw.get("gitShortcuts", raw.get("git_shortcuts", True))),
-        interactive_shell=bool(shell.get("interactive", True)),
+        load_shell_rc=load_shell_rc,
     )
 
 
@@ -125,4 +130,3 @@ def load_config(start: Path | None = None) -> WorkspaceConfig:
         aliases=_as_string_mapping(data.get("aliases"), "aliases"),
         exec_settings=_normalize_exec(data.get("exec")),
     )
-

@@ -763,7 +763,7 @@ class GitWorkspace(App[None]):
 
     def start_command(self, repo: Repo, value: str, mode: ExecMode) -> None:
         try:
-            resolved = resolve_command(value, repo, self.workspace.config, mode)
+            resolved = resolve_command(value, repo, self.workspace.config, mode, load_shell_rc=True)
         except ValueError as exc:
             self.write_log(Text(str(exc), style="bold red"))
             return
@@ -834,7 +834,7 @@ class GitWorkspace(App[None]):
             proc = subprocess.Popen(
                 resolved.args,
                 cwd=str(resolved.cwd),
-                env=process_env(),
+                env=process_env(load_shell_rc=self.shell_rc_enabled()),
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -860,6 +860,9 @@ class GitWorkspace(App[None]):
         finally:
             elapsed = time.monotonic() - started
             self.post_message(CommandFinished(repo, returncode, elapsed))
+
+    def shell_rc_enabled(self) -> bool:
+        return self.workspace.config.exec_settings.load_shell_rc is not False
 
     def finish_command(self, repo: Repo, returncode: int, elapsed: float) -> None:
         canceled = self.cancel_requested or returncode in {-signal.SIGTERM, -signal.SIGKILL}

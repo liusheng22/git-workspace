@@ -26,7 +26,7 @@ exec:
   defaultMode: git
   gitShortcuts: false
   shell:
-    interactive: false
+    loadRc: true
 """,
         encoding="utf-8",
     )
@@ -40,7 +40,28 @@ exec:
     assert config.aliases["gco"] == "checkout"
     assert config.exec_settings.default_mode == ExecMode.GIT
     assert not config.exec_settings.git_shortcuts
-    assert not config.exec_settings.interactive_shell
+    assert config.exec_settings.load_shell_rc
+
+
+def test_shell_rc_loading_uses_runtime_default_when_not_configured(tmp_path: Path) -> None:
+    config = load_config(tmp_path)
+
+    assert config.exec_settings.load_shell_rc is None
+
+
+def test_legacy_interactive_shell_config_does_not_load_rc(tmp_path: Path) -> None:
+    (tmp_path / "workspace.yml").write_text(
+        """
+exec:
+  shell:
+    interactive: true
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.exec_settings.load_shell_rc is None
 
 
 def test_local_config_overrides(tmp_path: Path) -> None:
@@ -60,4 +81,3 @@ exec:
     )
 
     assert load_config(tmp_path).exec_settings.default_mode == ExecMode.SHELL
-

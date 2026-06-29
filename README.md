@@ -96,7 +96,17 @@ api@main git > gco dev
 :shell
 ```
 
-Shell aliases and functions are loaded best-effort. Portable team shortcuts should go in `workspace.yml` or Git's own `alias.*` config.
+Inside the TUI, Git Workspace runs shell commands through a child shell that loads common rc files such as `.zshrc` or `.bashrc`. This keeps local aliases and functions available while keeping the loading scoped to the TUI child process, not your existing terminal tabs. If an rc file has errors, Git Workspace ignores the rc failure and continues running the command. Portable team shortcuts should still go in `workspace.yml` or Git's own `alias.*` config.
+
+CLI commands such as `gws exec` do not load shell rc files by default. To force one behavior for a workspace, configure it explicitly:
+
+```yaml
+exec:
+  shell:
+    loadRc: true
+```
+
+Use `loadRc: false` if you want the TUI to run shell commands without reading shell startup files.
 
 ## CLI Safety Flow
 
@@ -171,7 +181,7 @@ exec:
   defaultMode: shell
   gitShortcuts: true
   shell:
-    interactive: true
+    loadRc: true
 ```
 
 Use `workspace.local.yml` for machine-specific overrides. It should usually stay uncommitted.
@@ -239,6 +249,7 @@ g plan
 - `plan`, `pull`, and `sync` inspect branch and dirty state before changing repositories.
 - Dirty worktrees are not auto-fixed.
 - Unsafe branch switching is skipped.
+- TUI shell commands load shell rc files inside a child process by default. Use `exec.shell.loadRc: false` if your rc files have side effects you do not want inside Git Workspace.
 
 When in doubt:
 

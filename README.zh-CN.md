@@ -96,7 +96,17 @@ api@main git > gco dev
 :shell
 ```
 
-shell alias / function 会尽量加载，但这是 best-effort。团队共享的 Git 快捷命令建议放到 `workspace.yml` 或 Git 自己的 `alias.*` 配置里。
+在 TUI 里，Git Workspace 会通过一个子 shell 执行命令，并加载常见的 rc 文件，比如 `.zshrc` 或 `.bashrc`。这样本机 alias / function 可以继续使用，但加载范围限制在 TUI 的子进程里，不会去控制你已经打开的其它终端。如果 rc 文件有错误，Git Workspace 会忽略 rc 加载失败并继续执行命令。团队共享的快捷命令仍然建议放到 `workspace.yml` 或 Git 自己的 `alias.*` 配置里。
+
+CLI 命令，比如 `gws exec`，默认不会加载 shell rc 文件。如果你想对某个工作区强制指定行为，可以显式配置：
+
+```yaml
+exec:
+  shell:
+    loadRc: true
+```
+
+如果你希望 TUI 执行命令时也不读取 shell 启动文件，可以配置 `loadRc: false`。
 
 ## CLI 安全工作流
 
@@ -171,7 +181,7 @@ exec:
   defaultMode: shell
   gitShortcuts: true
   shell:
-    interactive: true
+    loadRc: true
 ```
 
 `workspace.local.yml` 可以放本机私有覆盖配置，通常不应该提交到 Git。
@@ -239,6 +249,7 @@ g plan
 - `plan`、`pull`、`sync` 会检查分支和脏工作区状态，更适合安全批量 Git 工作流。
 - 脏工作区不会被自动修复。
 - 不安全的切分支会被跳过。
+- TUI 里的 shell 命令默认会在子进程里加载 shell rc 文件。如果你的 rc 文件有不希望在 Git Workspace 里触发的副作用，可以使用 `exec.shell.loadRc: false` 关闭。
 
 不确定当前状态时，先运行：
 

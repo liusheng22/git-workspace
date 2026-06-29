@@ -56,7 +56,7 @@ class PlanItem:
 class ExecSettings:
     default_mode: ExecMode = ExecMode.SHELL
     git_shortcuts: bool = True
-    interactive_shell: bool = True
+    load_shell_rc: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -78,4 +78,3 @@ class Workspace:
     @property
     def root(self) -> Path:
         return self.config.root
-

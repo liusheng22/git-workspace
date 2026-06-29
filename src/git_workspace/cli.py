@@ -135,7 +135,12 @@ def do_exec(tokens: list[str], start: Path | None) -> int:
         resolved = resolve_command(command, repo, workspace.config, ExecMode.SHELL)
         if resolved is None:
             continue
-        proc = subprocess.run(resolved.args, cwd=str(resolved.cwd), text=True, env=process_env())
+        proc = subprocess.run(
+            resolved.args,
+            cwd=str(resolved.cwd),
+            text=True,
+            env=process_env(load_shell_rc=workspace.config.exec_settings.load_shell_rc is True),
+        )
         exit_code = proc.returncode or exit_code
     return exit_code
 
