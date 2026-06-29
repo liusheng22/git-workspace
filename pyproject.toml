@@ -3,7 +3,7 @@ requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "git-workspace"
+name = "git-workspace-tui"
 version = "0.1.0"
 description = "Git-aware multi-repo terminal workspace"
 readme = "README.md"

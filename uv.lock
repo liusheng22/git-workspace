@@ -26,7 +26,7 @@ wheels = [
 ]
 
 [[package]]
-name = "git-workspace"
+name = "git-workspace-tui"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -8,10 +8,10 @@ Git Workspace (`gws`) is a Git-aware multi-repo terminal. It is built for one co
 
 ## 60-Second Start
 
-Install from GitHub:
+Install from PyPI:
 
 ```bash
-uv tool install git+https://github.com/liusheng22/git-workspace.git
+uv tool install git-workspace-tui
 ```
 
 Open the directory that contains your repos:
@@ -181,13 +181,19 @@ Use `workspace.local.yml` for machine-specific overrides. It should usually stay
 With `uv`:
 
 ```bash
-uv tool install git+https://github.com/liusheng22/git-workspace.git
+uv tool install git-workspace-tui
 ```
 
 With `pipx`:
 
 ```bash
-pipx install git+https://github.com/liusheng22/git-workspace.git
+pipx install git-workspace-tui
+```
+
+Install a fixed version from GitHub:
+
+```bash
+uv tool install git+https://github.com/liusheng22/git-workspace.git@v0.1.0
 ```
 
 From a local clone:
