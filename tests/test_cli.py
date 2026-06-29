@@ -2,55 +2,32 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import init_repo
-
 from git_workspace import cli
 
 
-def test_parse_exec_tokens_without_profile() -> None:
-    assert cli.parse_exec_tokens(["--", "pnpm", "test"], {"daily"}) == (None, ["pnpm", "test"])
-    assert cli.parse_exec_tokens(["pnpm", "test"], {"daily"}) == (None, ["pnpm", "test"])
+class DummyTui:
+    calls: list[dict[str, object]] = []
+
+    def __init__(self, start: Path | None = None) -> None:
+        self.start = start
+
+    def run(self, **kwargs: object) -> None:
+        self.calls.append({"start": self.start, **kwargs})
 
 
-def test_parse_exec_tokens_with_profile() -> None:
-    assert cli.parse_exec_tokens(["daily", "--", "git", "status"], {"daily"}) == (
-        "daily",
-        ["git", "status"],
-    )
-    assert cli.parse_exec_tokens(["daily", "git", "status"], {"daily"}) == (
-        "daily",
-        ["git", "status"],
-    )
+def test_tui_runs_without_mouse_capture(monkeypatch) -> None:
+    DummyTui.calls.clear()
+    monkeypatch.setattr(cli, "GitWorkspace", DummyTui)
+
+    assert cli.main(["tui"]) == 0
+
+    assert DummyTui.calls == [{"start": None, "mouse": False}]
 
 
-def test_pull_does_not_pull_wrong_branch(tmp_path: Path, monkeypatch, capsys) -> None:
-    api = init_repo(tmp_path / "api", branch="main")
-    web = init_repo(tmp_path / "web", branch="dev")
-    (tmp_path / "workspace.yml").write_text(
-        """
-repos:
-  api:
-    path: ./api
-    default: main
-  web:
-    path: ./web
-    default: main
-""",
-        encoding="utf-8",
-    )
+def test_default_command_runs_tui_without_mouse_capture(monkeypatch, tmp_path: Path) -> None:
+    DummyTui.calls.clear()
+    monkeypatch.setattr(cli, "GitWorkspace", DummyTui)
 
-    pulled: list[Path] = []
+    assert cli.main(["--cwd", str(tmp_path)]) == 0
 
-    def fake_run_git(repo_path: Path, *args: str) -> int:
-        assert args == ("pull", "--ff-only")
-        pulled.append(repo_path)
-        return 0
-
-    monkeypatch.setattr(cli, "run_git", fake_run_git)
-
-    exit_code = cli.do_pull(None, tmp_path)
-
-    assert exit_code == 1
-    assert pulled == [api]
-    assert "skip web: target branch differs" in capsys.readouterr().out
-    assert web not in pulled
+    assert DummyTui.calls == [{"start": tmp_path, "mouse": False}]

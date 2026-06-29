@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     command = args.command
 
     if command is None or command == "tui":
-        GitWorkspace(args.cwd).run()
+        GitWorkspace(args.cwd).run(mouse=False)
         return 0
 
     workspace = load_workspace(args.cwd)

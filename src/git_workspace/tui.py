@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import signal
 import subprocess
 import threading
@@ -14,12 +15,13 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
+from textual.widgets import DataTable, Footer, Header, RichLog, Static, TextArea
 
 from .executor import ResolvedCommand, process_env, resolve_command, terminate_process
 from .git import repo_state
 from .models import ExecMode, Repo, Workspace
-from .styles import branch_style, shorten
+from .styles import branch_style, shorten, status_style
+from .terminal import SelectionFriendlyLinuxDriver
 from .workspace import load_workspace
 
 
@@ -45,6 +47,17 @@ class BatchCommand:
     value: str
     mode: ExecMode
     repos: tuple[Repo, ...]
+
+
+@dataclass(frozen=True)
+class KeyDebugState:
+    raw_hex: str = "-"
+    raw_repr: str = "-"
+    decoded_repr: str = "-"
+    key: str = "-"
+    character_repr: str = "-"
+    normalized_repr: str = "-"
+    dropped: bool = False
 
 
 class LogMessage(Message):
@@ -95,64 +108,161 @@ class CommandLog(RichLog):
     can_focus = False
 
 
+class CommandInput(TextArea):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.cursor_blink = False
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key in {"shift+enter", "shift+\r", "shift+\n"}:
+            event.prevent_default()
+            event.stop()
+            start, end = self.selection
+            self._replace_via_keyboard("\n", start, end)
+            return
+        if event.key == "enter":
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.Submitted(self, self.text))
+            return
+        await super()._on_key(event)
+
+    class Submitted(Message):
+        def __init__(self, input: CommandInput, value: str) -> None:
+            super().__init__()
+            self.input = input
+            self.value = value
+
+
 class GitWorkspace(App[None]):
     ENABLE_COMMAND_PALETTE = False
+    TITLE = "Git Workspace"
 
     CSS = """
     Screen {
-        background: #0b1620;
-        color: #d7e0ea;
+        background: #0d1117;
+        color: #c9d1d9;
     }
 
     Header, Footer {
-        background: #102638;
+        background: #161b22;
         color: #e6edf3;
+    }
+
+    Header {
+        text-style: bold;
+        height: 1;
+    }
+
+    Header > .header--title {
+        text-style: bold;
+        color: #58a6ff;
+    }
+
+    Header > .header--key {
+        color: #58a6ff;
+    }
+
+    HeaderIcon {
+        display: none;
+        width: 0;
+        padding: 0;
+    }
+
+    Footer {
+        background: #161b22;
+        height: 1;
+    }
+
+    Footer > .footer--key {
+        color: #58a6ff;
+        text-style: bold;
+    }
+
+    Footer > .footer--description {
+        color: #8b949e;
     }
 
     #layout {
         height: 1fr;
+        padding: 0;
     }
 
     #left {
-        width: 44;
-        min-width: 34;
-        max-width: 52;
-        border: round #315a73;
-        background: #0e1f2d;
+        width: 42;
+        min-width: 36;
+        max-width: 48;
+        border: none;
+        border-right: solid #30363d;
+        background: #0d1117;
+        padding: 0;
     }
 
     #right {
         width: 1fr;
-        border: round #315a73;
-        background: #07111a;
+        border: none;
+        background: #0d1117;
+        padding: 0;
     }
 
     #repo-title, #exec-title {
         height: 1;
         padding: 0 1;
-        color: #7ee787;
+        color: #58a6ff;
         text-style: bold;
-        background: #102638;
+        background: #161b22;
+    }
+
+    #key-debug {
+        display: none;
+        height: 4;
+        padding: 0 1;
+        background: #0d1117;
+        color: #e6edf3;
+        border-bottom: solid #30363d;
+    }
+
+    #key-debug.-enabled {
+        display: block;
     }
 
     #repo-table {
         height: 1fr;
-        background: #0e1f2d;
-        color: #d7e0ea;
+        background: #0d1117;
+        color: #c9d1d9;
     }
 
     #repo-table > .datatable--header {
-        background: #18364a;
-        color: #9ecbff;
+        background: #21262d;
+        color: #58a6ff;
         text-style: bold;
+        border-bottom: solid #30363d;
+    }
+
+    #repo-table > .datatable--odd-row {
+        background: transparent;
     }
 
     #repo-table > .datatable--even-row {
-        background: #102638 60%;
+        background: #161b22 30%;
+    }
+
+    #repo-table > .datatable--odd-row:hover {
+        background: #21262d 50%;
+    }
+
+    #repo-table > .datatable--even-row:hover {
+        background: #21262d 50%;
     }
 
     #repo-table > .datatable--cursor {
-        background: #2f6f95;
+        background: #1f6feb;
+        color: #ffffff;
+        text-style: bold;
+    }
+
+    #repo-table > .datatable--cursor-cell {
+        background: #1f6feb;
         color: #ffffff;
         text-style: bold;
     }
@@ -160,44 +270,76 @@ class GitWorkspace(App[None]):
     #exec-log {
         height: 1fr;
         padding: 0 1;
-        background: #07111a;
-        color: #d7e0ea;
+        background: #0d1117;
+        color: #c9d1d9;
     }
 
     #command-line {
-        height: 3;
-        margin: 0 1 1 1;
+        height: 5;
+        margin: 0;
         padding: 0 1;
-        border: heavy #2f6f95;
-        background: #0e1f2d;
+        border-top: solid #30363d;
+        background: #161b22;
     }
 
     #command-line:focus-within {
-        border: heavy #7ee787;
-        background: #102638;
+        border-top: solid #58a6ff;
+        background: #21262d;
     }
 
     #prompt {
         width: auto;
         min-width: 14;
         max-width: 32;
-        content-align: left middle;
-        color: #7ee787;
+        height: 3;
+        content-align: left top;
+        color: #58a6ff;
         text-style: bold;
+        padding: 0 1;
     }
 
     #cmd {
         width: 1fr;
-        height: 1;
-        padding: 0;
+        height: 3;
+        padding: 0 1;
         border: none;
-        background: #0e1f2d;
+        background: transparent;
         color: #e6edf3;
+        scrollbar-size: 1 1;
     }
 
     #cmd:focus {
-        background: #102638;
+        background: transparent;
         color: #ffffff;
+    }
+
+    #cmd .text-area--cursor {
+        color: #58a6ff;
+        text-style: bold;
+    }
+
+    #cmd .text-area--placeholder {
+        color: #6e7681;
+    }
+
+    #cmd .text-area--cursor-line {
+        background: transparent;
+    }
+
+    #exec-log {
+        scrollbar-background: #161b22;
+        scrollbar-background-hover: #21262d;
+        scrollbar-color: #30363d;
+        scrollbar-color-hover: #58a6ff;
+        scrollbar-size: 1 1;
+    }
+
+    #repo-table {
+        scrollbar-background: #161b22;
+        scrollbar-background-hover: #21262d;
+        scrollbar-color: #30363d;
+        scrollbar-color-hover: #58a6ff;
+        scrollbar-size: 1 1;
     }
     """
 
@@ -208,6 +350,8 @@ class GitWorkspace(App[None]):
         Binding("ctrl+q", "quit", show=False, priority=True),
         ("ctrl+r", "refresh", "刷新"),
         ("ctrl+l", "clear_log", "清屏"),
+        Binding("pageup", "log_page_up", "日志上翻", key_display="fn+↑", priority=True),
+        Binding("pagedown", "log_page_down", "日志下翻", key_display="fn+↓", priority=True),
         Binding("ctrl+j", "next_repo", show=False, priority=True),
         Binding("ctrl+k", "previous_repo", show=False, priority=True),
         Binding("alt+down", "next_repo", show=False, priority=True),
@@ -217,7 +361,7 @@ class GitWorkspace(App[None]):
     ]
 
     def __init__(self, start: Path | None = None) -> None:
-        super().__init__()
+        super().__init__(driver_class=SelectionFriendlyLinuxDriver)
         self.start = start
         self.workspace: Workspace = load_workspace(start)
         self.repos: list[Repo] = list(self.workspace.repos)
@@ -231,9 +375,11 @@ class GitWorkspace(App[None]):
         self.command_running = False
         self.current_process: subprocess.Popen[str] | None = None
         self.cancel_requested = False
+        self.key_debug_enabled = os.environ.get("GWS_KEY_DEBUG") == "1"
+        self.key_debug_state = KeyDebugState()
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header(show_clock=False)
         with Horizontal(id="layout"):
             with Vertical(id="left"):
                 yield Static("ALL / 仓库  Tab/Shift+Tab", id="repo-title")
@@ -247,14 +393,15 @@ class GitWorkspace(App[None]):
                 )
             with Vertical(id="right"):
                 yield Static("exec", id="exec-title")
+                yield Static("", id="key-debug")
                 yield CommandLog(id="exec-log", max_lines=5000, wrap=True, highlight=True, markup=False)
                 with Horizontal(id="command-line"):
                     yield Static("shell ›", id="prompt")
-                    yield Input(
-                        placeholder="输入命令，Enter 执行；:git / :shell 切换模式",
+                    yield CommandInput(
+                        placeholder="输入命令，Enter 执行；Shift+Enter 换行；:git / :shell 切换模式",
                         id="cmd",
                         compact=True,
-                        select_on_focus=False,
+                        highlight_cursor_line=False,
                     )
         yield Footer()
 
@@ -263,11 +410,8 @@ class GitWorkspace(App[None]):
         self.repo_table.move_cursor(row=0, column=0, scroll=True)
         self.update_context()
         if not self.repos:
-            self.write_log(Text("当前工作区没有发现 Git 仓库", style="bold red"))
-        else:
-            self.write_log(Text("Git Workspace ready", style="bold green"))
-        self.write_log("默认 ALL 范围；Tab/Shift+Tab 切换仓库；Enter 执行；Ctrl+C 取消/退出。")
-        self.write_log(":git 切到 Git 快捷模式，:shell 切回终端模式。")
+            self.write_log(Text("当前工作区没有发现 Git 仓库", style="bold #f85149"))
+        self.update_key_debug()
         self.focus_command_input()
         self.call_after_refresh(self.focus_command_input)
 
@@ -280,12 +424,16 @@ class GitWorkspace(App[None]):
         return self.query_one("#exec-log", RichLog)
 
     @property
-    def command_input(self) -> Input:
-        return self.query_one("#cmd", Input)
+    def command_input(self) -> CommandInput:
+        return self.query_one("#cmd", CommandInput)
 
     @property
     def prompt(self) -> Static:
         return self.query_one("#prompt", Static)
+
+    @property
+    def key_debug(self) -> Static:
+        return self.query_one("#key-debug", Static)
 
     @property
     def selected_repo(self) -> Repo | None:
@@ -309,25 +457,117 @@ class GitWorkspace(App[None]):
 
     def receive_text_input(self, text: str) -> None:
         self.focus_command_input()
-        self.command_input.insert_text_at_cursor(text)
+        self.command_input.insert(text, maintain_selection_offset=False)
+
+    def set_command_text(self, value: str) -> None:
+        self.command_input.load_text(value)
+        self.command_input.move_cursor(self.command_input.document.end)
+
+    def clear_command_input(self) -> None:
+        self.command_input.load_text("")
+
+    def update_key_debug(self) -> None:
+        debug = self.key_debug
+        debug.set_class(self.key_debug_enabled, "-enabled")
+        if not self.key_debug_enabled:
+            debug.update("")
+            return
+        state = self.key_debug_state
+        dropped = "yes" if state.dropped else "no"
+        debug.update(
+            Text.assemble(
+                ("KEY DEBUG  ", "bold #d29922"),
+                ("raw ", "bold #58a6ff"),
+                (state.raw_hex, "#e6edf3"),
+                "\n",
+                ("repr ", "bold #58a6ff"),
+                (state.raw_repr, "#c9d1d9"),
+                ("  decoded ", "bold #58a6ff"),
+                (state.decoded_repr, "#c9d1d9"),
+                "\n",
+                ("key ", "bold #58a6ff"),
+                (state.key, "#e6edf3"),
+                ("  char ", "bold #58a6ff"),
+                (state.character_repr, "#c9d1d9"),
+                ("  normalized ", "bold #58a6ff"),
+                (state.normalized_repr, "#c9d1d9"),
+                ("  dropped ", "bold #58a6ff"),
+                (dropped, "#f85149" if state.dropped else "#3fb950"),
+            )
+        )
+
+    def record_raw_input(self, raw_data: bytes, decoded_data: str) -> None:
+        self.key_debug_state = KeyDebugState(
+            raw_hex=" ".join(f"{byte:02x}" for byte in raw_data),
+            raw_repr=repr(raw_data),
+            decoded_repr=repr(decoded_data),
+            key=self.key_debug_state.key,
+            character_repr=self.key_debug_state.character_repr,
+            normalized_repr=self.key_debug_state.normalized_repr,
+            dropped=self.key_debug_state.dropped,
+        )
+        self.update_key_debug()
+
+    def record_key_event(
+        self,
+        key: str,
+        character: str | None,
+        normalized_character: str | None,
+        dropped: bool,
+    ) -> None:
+        self.key_debug_state = KeyDebugState(
+            raw_hex=self.key_debug_state.raw_hex,
+            raw_repr=self.key_debug_state.raw_repr,
+            decoded_repr=self.key_debug_state.decoded_repr,
+            key=key,
+            character_repr=repr(character),
+            normalized_repr=repr(normalized_character),
+            dropped=dropped,
+        )
+        self.update_key_debug()
+
+    def sync_badge(self, ahead: int | None, behind: int | None) -> str:
+        parts: list[str] = []
+        if ahead:
+            parts.append(f"↑{ahead}")
+        if behind:
+            parts.append(f"↓{behind}")
+        return "".join(parts)
+
+    def append_sync_badge(self, text: Text, ahead: int | None, behind: int | None) -> None:
+        if ahead:
+            text.append(f"  ↑{ahead}", style=status_style("ahead"))
+        if behind:
+            text.append(f"  ↓{behind}", style=status_style("behind"))
 
     def repo_cells(self, repo: Repo) -> tuple[Text, Text, Text]:
         state = repo_state(repo)
-        name = Text(repo.name, style="bold #d7e0ea")
-        current_branch = Text(shorten(state.branch, 14), style=branch_style(state.branch))
-        worktree = Text(state.dirty_label, style="bold red" if state.dirty else "bold green")
+        name = Text(repo.name, style="bold #e6edf3")
+
+        badge = self.sync_badge(state.ahead, state.behind)
+        branch_width = 14
+        if badge:
+            branch_width = max(5, branch_width - len(badge) - 1)
+        branch_text = shorten(state.branch, branch_width)
+        if badge:
+            branch_text = f"{branch_text} {badge}"
+        current_branch = Text(branch_text, style=branch_style(state.branch))
+
+        worktree_status = "dirty" if state.dirty else "clean"
+        worktree = Text(worktree_status, style=status_style(worktree_status))
+
         return name, current_branch, worktree
 
     def populate_repo_table(self) -> None:
         table = self.repo_table
         table.clear(columns=True)
-        table.add_column("repo", width=21, key="repo")
+        table.add_column("repo", width=18, key="repo")
         table.add_column("branch", width=14, key="branch")
-        table.add_column("state", width=8, key="state")
+        table.add_column("state", width=7, key="state")
         table.add_row(
-            Text("ALL REPOS", style="bold #7ee787"),
-            Text("-", style="dim"),
-            Text("ALL", style="bold #7ee787"),
+            Text("ALL REPOS", style="bold #58a6ff"),
+            Text("—", style="#6e7681"),
+            Text("ALL", style="bold #58a6ff"),
             key="__all__",
         )
         for repo in self.repos:
@@ -349,17 +589,18 @@ class GitWorkspace(App[None]):
         target = self.selected_target
         if target.is_all:
             title = Text()
-            title.append("ALL", style="bold #7ee787")
-            title.append(f"  {len(self.repos)} repos", style="bold #9ecbff")
+            title.append("ALL", style="bold #58a6ff")
+            title.append(f"  {len(self.repos)} repos", style="bold #8b949e")
             if self.command_running:
-                title.append("  running", style="bold yellow")
+                title.append("  running", style="bold #d29922")
             elif self.batch_queue or self.pending or self.current_batch is not None:
                 queued = len(self.pending) + len(self.batch_queue)
-                title.append(f"  queued:{queued}", style="bold yellow")
+                title.append(f"  queued:{queued}", style="bold #d29922")
             self.query_one("#exec-title", Static).update(title)
+
             prompt = Text()
-            prompt.append("ALL", style="bold #7ee787")
-            prompt.append(f" {self.exec_mode.value} ›", style="bold green")
+            prompt.append("ALL", style="bold #58a6ff")
+            prompt.append(f" {self.exec_mode.value} ›", style="bold #3fb950")
             self.prompt.update(prompt)
             return
 
@@ -368,23 +609,24 @@ class GitWorkspace(App[None]):
 
         state = repo_state(repo)
         title = Text()
-        title.append(self.exec_mode.value.upper(), style="bold green")
+        title.append(self.exec_mode.value.upper(), style="bold #3fb950")
         title.append(" ")
-        title.append(repo.name, style="bold #d7e0ea")
-        title.append(" @ ", style="#8b949e")
+        title.append(repo.name, style="bold #e6edf3")
+        title.append("  branch ", style="#6e7681")
         title.append(state.branch, style=branch_style(state.branch))
-        title.append(f"  {state.dirty_label}", style="bold red" if state.dirty else "bold green")
+        self.append_sync_badge(title, state.ahead, state.behind)
+        title.append(f"  {state.dirty_label}", style="bold #f85149" if state.dirty else "bold #3fb950")
         if self.command_running:
-            title.append("  running", style="bold yellow")
+            title.append("  running", style="bold #d29922")
         elif self.pending:
-            title.append(f"  queued:{len(self.pending)}", style="bold yellow")
+            title.append(f"  queued:{len(self.pending)}", style="bold #d29922")
         self.query_one("#exec-title", Static).update(title)
 
         prompt = Text()
-        prompt.append(shorten(repo.name, 10), style="bold #9ecbff")
+        prompt.append(shorten(repo.name, 10), style="bold #58a6ff")
         prompt.append("@")
         prompt.append(shorten(state.branch, 8), style=branch_style(state.branch))
-        prompt.append(f" {self.exec_mode.value} ›", style="bold green")
+        prompt.append(f" {self.exec_mode.value} ›", style="bold #3fb950")
         self.prompt.update(prompt)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -407,11 +649,17 @@ class GitWorkspace(App[None]):
             if event.key == "up":
                 event.prevent_default()
                 event.stop()
+                if self.command_input.cursor_location[0] > 0:
+                    self.command_input.action_cursor_up()
+                    return
                 self.history_previous()
                 return
             if event.key == "down":
                 event.prevent_default()
                 event.stop()
+                if self.command_input.cursor_location[0] < self.command_input.document.line_count - 1:
+                    self.command_input.action_cursor_down()
+                    return
                 self.history_next()
                 return
 
@@ -427,8 +675,7 @@ class GitWorkspace(App[None]):
             self.history_index = len(self.history) - 1
         else:
             self.history_index = max(0, self.history_index - 1)
-        self.command_input.value = self.history[self.history_index]
-        self.command_input.cursor_position = len(self.command_input.value)
+        self.set_command_text(self.history[self.history_index])
 
     def history_next(self) -> None:
         if self.history_index is None:
@@ -436,16 +683,18 @@ class GitWorkspace(App[None]):
         self.history_index += 1
         if self.history_index >= len(self.history):
             self.history_index = None
-            self.command_input.value = ""
+            self.clear_command_input()
         else:
-            self.command_input.value = self.history[self.history_index]
-        self.command_input.cursor_position = len(self.command_input.value)
+            self.set_command_text(self.history[self.history_index])
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    def on_command_input_submitted(self, event: CommandInput.Submitted) -> None:
         value = event.value.strip()
-        self.command_input.value = ""
+        self.clear_command_input()
         self.history_index = None
         if not value:
+            return
+        if self.exec_mode == ExecMode.SHELL:
+            self.submit_command(value)
             return
         for command in [part.strip() for part in value.splitlines() if part.strip()]:
             self.submit_command(command)
@@ -469,7 +718,7 @@ class GitWorkspace(App[None]):
             if repo is None:
                 return
             self.pending.append(QueuedCommand(repo, value, self.exec_mode))
-            self.write_log(Text(f"queued: {repo.name} {self.exec_mode.value} › {value}", style="yellow"))
+            self.write_log(Text(f"queued: {repo.name} {self.exec_mode.value} › {value}", style="#d29922"))
             self.update_context()
             return
         target = self.selected_target
@@ -493,14 +742,21 @@ class GitWorkspace(App[None]):
             return True
         if value == ":shell":
             self.exec_mode = ExecMode.SHELL
-            self.write_log(Text("mode: shell", style="bold green"))
+            self.write_log(Text("mode: shell", style="bold #3fb950"))
             self.update_context()
             self.focus_command_input()
             return True
         if value == ":git":
             self.exec_mode = ExecMode.GIT
-            self.write_log(Text("mode: git", style="bold green"))
+            self.write_log(Text("mode: git", style="bold #3fb950"))
             self.update_context()
+            self.focus_command_input()
+            return True
+        if value == ":keys":
+            self.key_debug_enabled = not self.key_debug_enabled
+            state = "on" if self.key_debug_enabled else "off"
+            self.write_log(Text(f"key debug: {state}", style="bold #d29922"))
+            self.update_key_debug()
             self.focus_command_input()
             return True
         return False
@@ -516,16 +772,16 @@ class GitWorkspace(App[None]):
 
         state = repo_state(repo)
         context = Text("\n")
-        context.append(repo.name, style="bold #9ecbff")
-        context.append(" @ ", style="#8b949e")
+        context.append(repo.name, style="bold #58a6ff")
+        context.append(" @ ", style="#6e7681")
         context.append(state.branch, style=branch_style(state.branch))
         self.write_log(context)
 
-        line = Text(f"{mode.value} › ", style="bold green")
-        line.append(value, style="bold white")
+        line = Text(f"{mode.value} › ", style="bold #3fb950")
+        line.append(value, style="bold #e6edf3")
         self.write_log(line)
         if resolved.expanded and resolved.expanded != value:
-            self.write_log(Text(f"expanded: {resolved.expanded}", style="dim"))
+            self.write_log(Text(f"expanded: {resolved.expanded}", style="#6e7681"))
 
         self.command_running = True
         self.cancel_requested = False
@@ -550,26 +806,26 @@ class GitWorkspace(App[None]):
     def start_workspace_command(self, value: str, mode: ExecMode) -> None:
         repos = self.candidate_repos_for_workspace_command(value)
         if not repos:
-            self.write_log(Text("当前工作区没有发现 Git 仓库", style="bold red"))
+            self.write_log(Text("当前工作区没有发现 Git 仓库", style="bold #f85149"))
             return
         batch = BatchCommand(value, mode, tuple(repos))
         if self.command_running or self.current_batch is not None:
             self.batch_queue.append(batch)
-            self.write_log(Text(f"queued: ALL {mode.value} › {value}", style="yellow"))
+            self.write_log(Text(f"queued: ALL {mode.value} › {value}", style="#d29922"))
             self.update_context()
             return
         self.current_batch = batch
         self.current_batch_index = 0
-        self.write_log(Text(f"scope: ALL ({len(repos)} repos)", style="bold #7ee787"))
+        self.write_log(Text(f"scope: ALL ({len(repos)} repos)", style="bold #58a6ff"))
         self.update_context()
-        self.run_next_queued()
+        self.start_command(batch.repos[0], batch.value, batch.mode)
 
     def queue_workspace_command(self, value: str, mode: ExecMode) -> None:
         repos = self.candidate_repos_for_workspace_command(value)
         if not repos:
             return
         self.batch_queue.append(BatchCommand(value, mode, tuple(repos)))
-        self.write_log(Text(f"queued: ALL {mode.value} › {value}", style="yellow"))
+        self.write_log(Text(f"queued: ALL {mode.value} › {value}", style="#d29922"))
 
     def run_command_thread(self, repo: Repo, resolved: ResolvedCommand) -> None:
         started = time.monotonic()
@@ -596,10 +852,10 @@ class GitWorkspace(App[None]):
                     self.thread_write_log(line.replace("\r", "\n"))
             returncode = proc.wait()
         except FileNotFoundError as exc:
-            self.thread_write_log(Text(f"命令不存在：{exc}", style="bold red"))
+            self.thread_write_log(Text(f"命令不存在：{exc}", style="bold #f85149"))
             returncode = 127
         except Exception as exc:
-            self.thread_write_log(Text(f"执行异常：{exc}", style="bold red"))
+            self.thread_write_log(Text(f"执行异常：{exc}", style="bold #f85149"))
             returncode = 1
         finally:
             elapsed = time.monotonic() - started
@@ -611,11 +867,11 @@ class GitWorkspace(App[None]):
         self.current_process = None
         self.cancel_requested = False
         if canceled:
-            self.write_log(Text(f"已取消  ({elapsed:.1f}s)", style="bold yellow"))
+            self.write_log(Text(f"已取消  ({elapsed:.1f}s)", style="bold #d29922"))
         elif returncode == 0:
-            self.write_log(Text(f"完成  ({elapsed:.1f}s)", style="bold green"))
+            self.write_log(Text(f"完成  ({elapsed:.1f}s)", style="bold #3fb950"))
         else:
-            self.write_log(Text(f"失败：exit {returncode}  ({elapsed:.1f}s)", style="bold red"))
+            self.write_log(Text(f"失败：exit {returncode}  ({elapsed:.1f}s)", style="bold #f85149"))
         self.refresh_repo(repo)
         self.update_context()
         self.focus_command_input()
@@ -634,16 +890,21 @@ class GitWorkspace(App[None]):
             if self.current_batch_index + 1 < len(batch.repos):
                 self.current_batch_index += 1
                 self.update_context()
-                self.start_command(batch.repos[self.current_batch_index], batch.value, batch.mode)
+                self.start_command(
+                    batch.repos[self.current_batch_index],
+                    batch.value,
+                    batch.mode,
+                )
                 return
-            self.write_log(Text(f"ALL completed  ({len(batch.repos)} repos)", style="bold green"))
+            self.write_log(Text(f"ALL completed  ({len(batch.repos)} repos)", style="bold #3fb950"))
             self.current_batch = None
             self.current_batch_index = 0
+            self.update_context()
         if self.batch_queue:
             batch = self.batch_queue.popleft()
             self.current_batch = batch
             self.current_batch_index = 0
-            self.write_log(Text(f"scope: ALL ({len(batch.repos)} repos)", style="bold #7ee787"))
+            self.write_log(Text(f"scope: ALL ({len(batch.repos)} repos)", style="bold #58a6ff"))
             self.update_context()
             self.start_command(batch.repos[0], batch.value, batch.mode)
 
@@ -672,11 +933,19 @@ class GitWorkspace(App[None]):
         else:
             self.repo_table.move_cursor(row=0, column=0, scroll=True)
         self.update_context()
-        self.write_log(Text("已刷新仓库列表", style="green"))
+        self.write_log(Text("已刷新仓库列表", style="bold #3fb950"))
         self.focus_command_input()
 
     def action_clear_log(self) -> None:
         self.exec_log.clear()
+        self.focus_command_input()
+
+    def action_log_page_up(self) -> None:
+        self.exec_log.scroll_page_up(animate=False)
+        self.focus_command_input()
+
+    def action_log_page_down(self) -> None:
+        self.exec_log.scroll_page_down(animate=False)
         self.focus_command_input()
 
     def action_focus_input(self) -> None:
@@ -704,7 +973,7 @@ class GitWorkspace(App[None]):
         proc = self.current_process
         if not self.command_running or proc is None or proc.poll() is not None:
             if show_idle:
-                self.write_log(Text("没有正在执行的命令", style="dim"))
+                self.write_log(Text("没有正在执行的命令", style="#6e7681"))
             return False
         self.cancel_requested = True
         self.pending.clear()
@@ -712,7 +981,7 @@ class GitWorkspace(App[None]):
         self.current_batch_index = 0
         self.batch_queue.clear()
         terminate_process(proc)
-        self.write_log(Text("正在取消当前命令...", style="yellow"))
+        self.write_log(Text("正在取消当前命令...", style="#d29922"))
         return True
 
     def action_interrupt(self) -> None:
