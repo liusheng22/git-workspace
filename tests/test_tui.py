@@ -18,6 +18,12 @@ async def _make_app(tmp_path: Path) -> GitWorkspace:
     return GitWorkspace(tmp_path)
 
 
+async def _wait_for_idle(app: GitWorkspace, pilot, timeout: float = 2.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while app.command_running and asyncio.get_running_loop().time() < deadline:
+        await pilot.pause(0.1)
+
+
 def test_tui_input_switch_and_mode(tmp_path: Path) -> None:
     async def run() -> None:
         app = await _make_app(tmp_path)
@@ -323,7 +329,7 @@ def test_tui_ctrl_c_cancels_running_command(tmp_path: Path) -> None:
             await pilot.pause(0.6)
             assert app.command_running
             await pilot.press("ctrl+c")
-            await pilot.pause(1.0)
+            await _wait_for_idle(app, pilot)
             assert not app.command_running
             assert app.is_running
             app.exit()
@@ -350,7 +356,7 @@ def test_tui_all_scope_runs_all_repos_and_keeps_input(tmp_path: Path) -> None:
             assert len(app.batch_queue) in {0, 1}
             assert app.focused is cmd
             await pilot.press("ctrl+c")
-            await pilot.pause(0.5)
+            await _wait_for_idle(app, pilot)
             assert not app.command_running
             assert not app.batch_queue
             assert app.focused is cmd

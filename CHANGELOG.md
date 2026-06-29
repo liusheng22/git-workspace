@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Adds a hard-kill fallback when canceling TUI commands so shell wrappers cannot leave the TUI stuck in a running state.
+- Keeps the TUI shell rc loading behavior from 0.1.1.
+
 ## 0.1.1
 
 - Loads shell rc files for TUI child shell commands by default, so local aliases and functions work inside the TUI.

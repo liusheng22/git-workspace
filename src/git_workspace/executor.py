@@ -223,3 +223,10 @@ def terminate_process(proc: subprocess.Popen[str]) -> None:
         os.killpg(proc.pid, signal.SIGTERM)
     except Exception:
         proc.terminate()
+
+
+def kill_process(proc: subprocess.Popen[str]) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        proc.kill()

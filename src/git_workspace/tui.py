@@ -17,7 +17,7 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import DataTable, Footer, Header, RichLog, Static, TextArea
 
-from .executor import ResolvedCommand, process_env, resolve_command, terminate_process
+from .executor import ResolvedCommand, kill_process, process_env, resolve_command, terminate_process
 from .git import repo_state
 from .models import ExecMode, Repo, Workspace
 from .styles import branch_style, shorten, status_style
@@ -375,6 +375,7 @@ class GitWorkspace(App[None]):
         self.command_running = False
         self.current_process: subprocess.Popen[str] | None = None
         self.cancel_requested = False
+        self.cancel_kill_delay = 0.4
         self.key_debug_enabled = os.environ.get("GWS_KEY_DEBUG") == "1"
         self.key_debug_state = KeyDebugState()
 
@@ -984,8 +985,13 @@ class GitWorkspace(App[None]):
         self.current_batch_index = 0
         self.batch_queue.clear()
         terminate_process(proc)
+        self.set_timer(self.cancel_kill_delay, lambda: self.kill_if_still_running(proc))
         self.write_log(Text("正在取消当前命令...", style="#d29922"))
         return True
+
+    def kill_if_still_running(self, proc: subprocess.Popen[str]) -> None:
+        if self.current_process is proc and proc.poll() is None:
+            kill_process(proc)
 
     def action_interrupt(self) -> None:
         if self.cancel_current_command(show_idle=False):
@@ -1000,4 +1006,5 @@ class GitWorkspace(App[None]):
         if proc is not None and proc.poll() is None:
             self.cancel_requested = True
             terminate_process(proc)
+            self.set_timer(self.cancel_kill_delay, lambda: self.kill_if_still_running(proc))
         self.exit()
