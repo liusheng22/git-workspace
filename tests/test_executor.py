@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from conftest import init_repo
 
 from git_workspace.config import load_config
@@ -56,7 +58,15 @@ def test_shell_invocation_loads_alias_without_rc_noise(tmp_path: Path, monkeypat
     repo_path = init_repo(tmp_path / "api")
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".zshrc").write_text(
+    shell = shutil.which("zsh")
+    rc_file = ".zshrc"
+    if shell is None:
+        shell = shutil.which("bash")
+        rc_file = ".bashrc"
+    if shell is None:
+        pytest.skip("requires zsh or bash")
+
+    (home / rc_file).write_text(
         """
 echo noisy startup
 alias __gws_alias_noise_test__='echo alias-ok'
@@ -64,7 +74,7 @@ alias __gws_alias_noise_test__='echo alias-ok'
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setenv("SHELL", shell)
 
     proc = subprocess.run(
         shell_invocation("__gws_alias_noise_test__", interactive=True),

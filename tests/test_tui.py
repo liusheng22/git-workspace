@@ -79,6 +79,7 @@ def test_tui_repo_context_shows_sync_badge(tmp_path: Path) -> None:
         repo = init_repo(tmp_path / "api")
         run(["git", "remote", "add", "origin", str(remote)], repo)
         run(["git", "push", "-u", "origin", "main"], repo)
+        run(["git", "symbolic-ref", "HEAD", "refs/heads/main"], remote)
         (repo / "local.txt").write_text("local\n", encoding="utf-8")
         run(["git", "add", "local.txt"], repo)
         run(["git", "commit", "-m", "local"], repo)
