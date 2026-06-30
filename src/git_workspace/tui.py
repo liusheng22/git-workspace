@@ -646,6 +646,9 @@ class GitWorkspace(App[None]):
         text.append("  ")
         text.append(status)
 
+    def append_copy_hint(self, text: Text) -> None:
+        text.append("  copy: opt/alt-drag", style="#8b949e")
+
     def shell_status_text(
         self,
         statuses: tuple[tuple[str, int], ...] | None = None,
@@ -749,6 +752,7 @@ class GitWorkspace(App[None]):
                 queued = len(self.pending) + len(self.batch_queue)
                 title.append(f"  queued:{queued}", style="bold #d29922")
             self.append_shell_status(title)
+            self.append_copy_hint(title)
             self.query_one("#exec-title", Static).update(title)
 
             prompt = Text()
@@ -767,6 +771,7 @@ class GitWorkspace(App[None]):
                 queued = len(self.pending) + len(self.batch_queue)
                 title.append(f"  queued:{queued}", style="bold #d29922")
             self.append_shell_status(title)
+            self.append_copy_hint(title)
             self.query_one("#exec-title", Static).update(title)
 
             prompt = Text()
@@ -792,6 +797,7 @@ class GitWorkspace(App[None]):
         elif self.pending:
             title.append(f"  queued:{len(self.pending)}", style="bold #d29922")
         self.append_shell_status(title)
+        self.append_copy_hint(title)
         self.query_one("#exec-title", Static).update(title)
 
         prompt = Text()
@@ -950,6 +956,10 @@ class GitWorkspace(App[None]):
             self.update_key_debug()
             self.focus_command_input()
             return True
+        if value in {":copy-help", "copy-help"}:
+            self.write_copy_help()
+            self.focus_command_input()
+            return True
         if value in {":summary", "summary"}:
             self.write_batch_summary(self.last_batch_results, "last batch")
             self.focus_command_input()
@@ -985,6 +995,20 @@ class GitWorkspace(App[None]):
             self.focus_command_input()
             return True
         return False
+
+    def write_copy_help(self) -> None:
+        text = Text("\n")
+        text.append("copy right output", style="bold #58a6ff")
+        text.append("\n")
+        text.append("Try terminal rectangular selection: ", style="#8b949e")
+        text.append("Option/Alt + drag", style="bold #d29922")
+        text.append(" inside the right output area.", style="#8b949e")
+        text.append("\n")
+        text.append(
+            "This keeps native terminal selection. Support depends on your terminal app.",
+            style="#8b949e",
+        )
+        self.write_log(text)
 
     def start_command(self, repo: Repo, value: str, mode: ExecMode) -> None:
         try:

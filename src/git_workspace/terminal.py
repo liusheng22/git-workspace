@@ -13,10 +13,10 @@ from textual._xterm_parser import XTermParser
 from textual.drivers.linux_driver import LinuxDriver
 from textual.message import Message
 
-KITTY_KEYBOARD = "\x1b[>9u"
+KITTY_KEYBOARD = "\x1b[>1u"
 XTERM_MODIFY_OTHER_KEYS = "\x1b[>4;2m"
 KEYBOARD_PROTOCOL_ENABLE = f"{XTERM_MODIFY_OTHER_KEYS}{KITTY_KEYBOARD}"
-SAFE_KITTY_KEYBOARD_ENABLES = {"\x1b[>1u", KITTY_KEYBOARD}
+SAFE_KITTY_KEYBOARD_ENABLES = {KITTY_KEYBOARD}
 UNSAFE_KITTY_KEYBOARD_ENABLE_RE = re.compile(r"\x1b\[>[0-9;]*u")
 SHIFT_ENTER_COMPAT_WINDOW_SECONDS = 1.25
 STANDALONE_SHIFT_KEYS = {"left_shift", "right_shift"}
@@ -143,11 +143,28 @@ class SelectionFriendlyLinuxDriver(LinuxDriver):
 
     def record_raw_input(self, raw_data: bytes, decoded_data: str) -> None:
         app = getattr(self, "_app", None)
+        if not getattr(app, "key_debug_enabled", False):
+            return
         recorder = getattr(app, "record_raw_input", None)
         if recorder is None:
             return
         with suppress(RuntimeError):
             app.call_from_thread(recorder, raw_data, decoded_data)
+
+    def record_key_input(
+        self,
+        raw_data: bytes | None,
+        decoded_data: str | None,
+        key: str,
+        character: str | None,
+        normalized_character: str | None,
+        dropped: bool,
+    ) -> None:
+        if is_selection_hostile_key(key):
+            return
+        if raw_data is not None and decoded_data is not None:
+            self.record_raw_input(raw_data, decoded_data)
+        self.record_key_event(key, character, normalized_character, dropped)
 
     def record_key_event(
         self,
@@ -156,7 +173,11 @@ class SelectionFriendlyLinuxDriver(LinuxDriver):
         normalized_character: str | None,
         dropped: bool,
     ) -> None:
+        if is_selection_hostile_key(key):
+            return
         app = getattr(self, "_app", None)
+        if not getattr(app, "key_debug_enabled", False):
+            return
         recorder = getattr(app, "record_key_event", None)
         if recorder is None:
             return
@@ -174,14 +195,17 @@ class SelectionFriendlyLinuxDriver(LinuxDriver):
     def process_message(self, message: Message) -> None:
         if isinstance(message, events.Key):
             now = time.monotonic()
+            raw_data = getattr(message, "_gws_raw_data", None)
+            decoded_data = getattr(message, "_gws_decoded_data", None)
+
             if message.key in STANDALONE_SHIFT_KEYS:
                 self._last_standalone_shift_at = now
-                self.record_key_event(message.key, message.character, None, True)
+                self.record_key_input(raw_data, decoded_data, message.key, message.character, None, True)
                 return
 
             promoted = self.promote_enter_after_standalone_shift(message, now)
             if promoted is not None:
-                self.record_key_event(promoted.key, promoted.character, None, False)
+                self.record_key_input(raw_data, decoded_data, promoted.key, promoted.character, None, False)
                 super().process_message(promoted)
                 return
 
@@ -190,7 +214,14 @@ class SelectionFriendlyLinuxDriver(LinuxDriver):
             normalized_character = None
             if message.character is None:
                 normalized_character = printable_character_for_key(message.key)
-            self.record_key_event(message.key, message.character, normalized_character, dropped)
+            self.record_key_input(
+                raw_data,
+                decoded_data,
+                message.key,
+                message.character,
+                normalized_character,
+                dropped,
+            )
             if dropped:
                 return
             if normalized_character is not None:
@@ -226,8 +257,9 @@ class SelectionFriendlyLinuxDriver(LinuxDriver):
                     unicode_data = decode(raw_data, final=final and last)
                     if not unicode_data:
                         break
-                    self.record_raw_input(raw_data, unicode_data)
                     for event in feed(unicode_data):
+                        event._gws_raw_data = raw_data
+                        event._gws_decoded_data = unicode_data
                         self.process_message(event)
             for event in tick():
                 self.process_message(event)

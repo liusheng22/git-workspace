@@ -82,6 +82,25 @@ def test_tui_repo_context_shows_branch_label(tmp_path: Path) -> None:
             assert "SHELL api  branch main  clean" in title_text
             assert "shell:" in title_text
             assert "rc:" in title_text
+            assert "copy: opt/alt-drag" in title_text
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_copy_help_command_explains_rectangular_selection(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        app.start_rc_probe = lambda: None  # type: ignore[method-assign]
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+
+            app.handle_builtin_command(":copy-help")
+
+            text = str(app.exec_log.lines)
+            assert "copy right output" in text
+            assert "Option/Alt + drag" in text
+            assert "depends on your terminal" in text
             app.exit()
 
     asyncio.run(run())

@@ -17,8 +17,8 @@ from git_workspace.terminal import (
 
 def test_strip_selection_hostile_modes_filters_focus_and_kitty_keyboard() -> None:
     assert strip_selection_hostile_modes("before\x1b[?1004h\x1b[>25uafter") == "beforeafter"
-    assert strip_selection_hostile_modes("before\x1b[>9uafter") == "before\x1b[>9uafter"
-    assert strip_selection_hostile_modes("before\x1b[>1;2;3uafter") == "beforeafter"
+    assert strip_selection_hostile_modes("before\x1b[>1uafter") == "before\x1b[>1uafter"
+    assert strip_selection_hostile_modes("before\x1b[>9uafter") == "beforeafter"
     assert strip_selection_hostile_modes("before\x1b[?1000h\x1b[?1003h\x1b[?1006hafter") == "beforeafter"
 
 
@@ -28,9 +28,9 @@ def test_selection_friendly_driver_filters_selection_hostile_modes(monkeypatch) 
     monkeypatch.setattr(LinuxDriver, "write", lambda self, data: written.append(data))
 
     driver = object.__new__(SelectionFriendlyLinuxDriver)
-    driver.write("before\x1b[?1004h\x1b[>25u\x1b[>9uafter")
+    driver.write("before\x1b[?1004h\x1b[>25u\x1b[>1uafter")
 
-    assert written == ["before\x1b[>9uafter"]
+    assert written == ["before\x1b[>1uafter"]
 
 
 def test_selection_friendly_driver_skips_empty_filtered_write(monkeypatch) -> None:
@@ -99,6 +99,150 @@ def test_selection_friendly_driver_drops_super_key_events(monkeypatch) -> None:
     driver.process_message(events.Key("shift+enter", None))
 
     assert [event.key for event in processed] == ["shift+enter"]
+
+
+def test_selection_friendly_driver_does_not_record_keys_when_debug_is_off() -> None:
+    recorded: list[tuple[str, object]] = []
+
+    class App:
+        key_debug_enabled = False
+
+        def call_from_thread(self, callback, *args):
+            callback(*args)
+
+        def record_raw_input(self, raw_data: bytes, decoded_data: str) -> None:
+            recorded.append(("raw", (raw_data, decoded_data)))
+
+        def record_key_event(
+            self,
+            key: str,
+            character: str | None,
+            normalized_character: str | None,
+            dropped: bool,
+        ) -> None:
+            recorded.append(("key", (key, character, normalized_character, dropped)))
+
+    driver = object.__new__(SelectionFriendlyLinuxDriver)
+    driver._app = App()
+
+    driver.record_raw_input(b"x", "x")
+    driver.record_key_event("left_super", None, None, True)
+
+    assert recorded == []
+
+
+def test_selection_friendly_driver_records_safe_keys_when_debug_is_on() -> None:
+    recorded: list[tuple[str, object]] = []
+
+    class App:
+        key_debug_enabled = True
+
+        def call_from_thread(self, callback, *args):
+            callback(*args)
+
+        def record_raw_input(self, raw_data: bytes, decoded_data: str) -> None:
+            recorded.append(("raw", (raw_data, decoded_data)))
+
+        def record_key_event(
+            self,
+            key: str,
+            character: str | None,
+            normalized_character: str | None,
+            dropped: bool,
+        ) -> None:
+            recorded.append(("key", (key, character, normalized_character, dropped)))
+
+    driver = object.__new__(SelectionFriendlyLinuxDriver)
+    driver._app = App()
+
+    driver.record_raw_input(b"x", "x")
+    driver.record_key_event("a", "a", None, False)
+
+    assert recorded == [("raw", (b"x", "x")), ("key", ("a", "a", None, False))]
+
+
+def test_selection_friendly_driver_does_not_record_hostile_key_event_when_debug_is_on() -> None:
+    recorded: list[tuple[str, object]] = []
+
+    class App:
+        key_debug_enabled = True
+
+        def call_from_thread(self, callback, *args):
+            callback(*args)
+
+        def record_key_event(
+            self,
+            key: str,
+            character: str | None,
+            normalized_character: str | None,
+            dropped: bool,
+        ) -> None:
+            recorded.append(("key", (key, character, normalized_character, dropped)))
+
+    driver = object.__new__(SelectionFriendlyLinuxDriver)
+    driver._app = App()
+
+    driver.record_key_event("left_super", None, None, True)
+
+    assert recorded == []
+
+
+def test_selection_friendly_driver_does_not_record_super_key_input_when_debug_is_on() -> None:
+    recorded: list[tuple[str, object]] = []
+
+    class App:
+        key_debug_enabled = True
+
+        def call_from_thread(self, callback, *args):
+            callback(*args)
+
+        def record_raw_input(self, raw_data: bytes, decoded_data: str) -> None:
+            recorded.append(("raw", (raw_data, decoded_data)))
+
+        def record_key_event(
+            self,
+            key: str,
+            character: str | None,
+            normalized_character: str | None,
+            dropped: bool,
+        ) -> None:
+            recorded.append(("key", (key, character, normalized_character, dropped)))
+
+    driver = object.__new__(SelectionFriendlyLinuxDriver)
+    driver._app = App()
+
+    driver.record_key_input(b"\x1b[57444;9u", "\x1b[57444;9u", "left_super", None, None, True)
+
+    assert recorded == []
+
+
+def test_selection_friendly_driver_records_non_hostile_key_input_when_debug_is_on() -> None:
+    recorded: list[tuple[str, object]] = []
+
+    class App:
+        key_debug_enabled = True
+
+        def call_from_thread(self, callback, *args):
+            callback(*args)
+
+        def record_raw_input(self, raw_data: bytes, decoded_data: str) -> None:
+            recorded.append(("raw", (raw_data, decoded_data)))
+
+        def record_key_event(
+            self,
+            key: str,
+            character: str | None,
+            normalized_character: str | None,
+            dropped: bool,
+        ) -> None:
+            recorded.append(("key", (key, character, normalized_character, dropped)))
+
+    driver = object.__new__(SelectionFriendlyLinuxDriver)
+    driver._app = App()
+
+    driver.record_key_input(b"a", "a", "a", "a", None, False)
+
+    assert recorded == [("raw", (b"a", "a")), ("key", ("a", "a", None, False))]
 
 
 def test_selection_friendly_driver_restores_printable_key_characters(monkeypatch) -> None:
