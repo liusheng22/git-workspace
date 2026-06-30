@@ -99,14 +99,41 @@ PY
 ```bash
 uv tool install --force git-workspace-tui
 gws --help
+gws --version
 ```
 
 ## 用户升级命令
 
-使用 `uv` 安装的用户这样升级：
+用户可以通过 gws 自己升级：
+
+```bash
+gws update
+```
+
+如果工具环境过旧，或者旧环境使用了不同 Python 解释器，可以强制重装：
+
+```bash
+gws update --force
+```
+
+对应的 `uv` 底层命令是：
 
 ```bash
 uv tool upgrade git-workspace-tui
+uv tool install --force git-workspace-tui
+```
+
+用户可以这样查看当前安装版本：
+
+```bash
+gws --version
+uv tool list | grep git-workspace-tui
+```
+
+用户可以这样查看 PyPI 最新版本：
+
+```bash
+python -m pip index versions git-workspace-tui
 ```
 
 使用 `pipx` 安装的用户这样升级：

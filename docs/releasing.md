@@ -99,14 +99,41 @@ PY
 ```bash
 uv tool install --force git-workspace-tui
 gws --help
+gws --version
 ```
 
 ## User Upgrade Commands
 
-Users who installed with `uv` upgrade with:
+Users can upgrade from gws itself:
+
+```bash
+gws update
+```
+
+If the tool environment is stale or was created with a different Python interpreter, force reinstall:
+
+```bash
+gws update --force
+```
+
+The equivalent `uv` commands are:
 
 ```bash
 uv tool upgrade git-workspace-tui
+uv tool install --force git-workspace-tui
+```
+
+Users can check their installed version with:
+
+```bash
+gws --version
+uv tool list | grep git-workspace-tui
+```
+
+Users can check the latest PyPI version with:
+
+```bash
+python -m pip index versions git-workspace-tui
 ```
 
 Users who installed with `pipx` upgrade with:

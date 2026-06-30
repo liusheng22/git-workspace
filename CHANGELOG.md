@@ -6,6 +6,7 @@
 - Adds actionable TUI batch summaries for multi-repo commands, including failed-repo targeting, retry, copy, and jump actions.
 - Shows shell rc loading status once in the TUI and keeps rc failures non-blocking.
 - Improves native terminal copy behavior by documenting rectangular selection and avoiding Cmd/Super key reporting that clears selections.
+- Adds `gws --version`, `gws update`, and `gws self update` for easier install verification and upgrades.
 
 ## 0.1.3
 

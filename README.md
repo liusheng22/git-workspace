@@ -236,25 +236,51 @@ Use `workspace.local.yml` for machine-specific overrides. It should usually stay
 
 The PyPI package name is `git-workspace-tui`. The installed commands are `gws` and `g`.
 
-With `uv`:
+Install with `uv`:
 
 ```bash
 uv tool install git-workspace-tui
 ```
 
-With `pipx`:
+Install with `pipx`:
 
 ```bash
 pipx install git-workspace-tui
 ```
 
-Upgrade an existing install:
+Check the installed version:
+
+```bash
+gws --version
+uv tool list | grep git-workspace-tui
+```
+
+Check the latest PyPI version:
+
+```bash
+python -m pip index versions git-workspace-tui
+```
+
+Upgrade from gws itself:
+
+```bash
+gws update
+```
+
+If the tool environment is stale or was created with a different Python interpreter, force reinstall:
+
+```bash
+gws update --force
+```
+
+The equivalent `uv` commands are:
 
 ```bash
 uv tool upgrade git-workspace-tui
+uv tool install --force git-workspace-tui
 ```
 
-If you installed with `pipx`:
+Upgrade a `pipx` install:
 
 ```bash
 pipx upgrade git-workspace-tui
@@ -263,13 +289,19 @@ pipx upgrade git-workspace-tui
 Install a specific PyPI version:
 
 ```bash
-uv tool install 'git-workspace-tui==0.1.0'
+uv tool install 'git-workspace-tui==0.1.4'
 ```
 
 Install a fixed version from GitHub:
 
 ```bash
-uv tool install git+https://github.com/liusheng22/git-workspace.git@v0.1.0
+uv tool install git+https://github.com/liusheng22/git-workspace.git@v0.1.4
+```
+
+Install the latest commit from GitHub before a PyPI release exists:
+
+```bash
+uv tool install --force git+https://github.com/liusheng22/git-workspace.git
 ```
 
 From a local clone:

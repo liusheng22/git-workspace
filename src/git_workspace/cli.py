@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from .executor import process_env, resolve_command
@@ -13,12 +15,20 @@ from .tui import GitWorkspace
 from .workspace import load_workspace
 
 
+def package_version() -> str:
+    try:
+        return version("git-workspace-tui")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gws",
         description="Git-aware multi-repo terminal workspace",
     )
     parser.add_argument("--cwd", type=Path, default=None, help="workspace start directory")
+    parser.add_argument("--version", action="version", version=f"gws {package_version()}")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -39,6 +49,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     exec_cmd = sub.add_parser("exec", help="execute a command in every selected repository")
     exec_cmd.add_argument("tokens", nargs=argparse.REMAINDER, metavar="...")
+
+    self_cmd = sub.add_parser("self", help="manage the gws installation")
+    self_sub = self_cmd.add_subparsers(dest="self_command")
+    self_update = self_sub.add_parser("update", help="upgrade gws using uv tool or pipx")
+    self_update.add_argument("--force", action="store_true", help="force reinstall with uv tool")
+
+    update = sub.add_parser("update", help="upgrade gws using uv tool or pipx")
+    update.add_argument("--force", action="store_true", help="force reinstall with uv tool")
 
     sub.add_parser("tui", help="open the TUI")
     return parser
@@ -145,6 +163,28 @@ def do_exec(tokens: list[str], start: Path | None) -> int:
     return exit_code
 
 
+def run_self_update(force: bool = False) -> int:
+    uv = shutil.which("uv")
+    if uv is not None:
+        command = [uv, "tool", "install", "--force", "git-workspace-tui"] if force else [uv, "tool", "upgrade", "git-workspace-tui"]
+        print("running:", " ".join(command), flush=True)
+        return subprocess.run(command).returncode
+
+    if force:
+        print("gws update --force requires uv", file=sys.stderr)
+        return 1
+
+    pipx = shutil.which("pipx")
+    if pipx is not None:
+        command = [pipx, "upgrade", "git-workspace-tui"]
+        print("running:", " ".join(command), flush=True)
+        return subprocess.run(command).returncode
+
+    print("gws update requires uv or pipx", file=sys.stderr)
+    print("Install uv, then run: uv tool install --force git-workspace-tui", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -153,6 +193,14 @@ def main(argv: list[str] | None = None) -> int:
     if command is None or command == "tui":
         GitWorkspace(args.cwd).run(mouse=False)
         return 0
+
+    if command == "update":
+        return run_self_update(args.force)
+    if command == "self":
+        if args.self_command == "update":
+            return run_self_update(args.force)
+        parser.parse_args(["self", "--help"])
+        return 2
 
     workspace = load_workspace(args.cwd)
     if command in {"status", "st", "s"}:

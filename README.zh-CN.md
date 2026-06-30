@@ -236,25 +236,51 @@ exec:
 
 PyPI 包名是 `git-workspace-tui`。安装后提供的命令是 `gws` 和 `g`。
 
-使用 `uv`：
+使用 `uv` 安装：
 
 ```bash
 uv tool install git-workspace-tui
 ```
 
-使用 `pipx`：
+使用 `pipx` 安装：
 
 ```bash
 pipx install git-workspace-tui
 ```
 
-升级已有安装：
+查看当前安装版本：
+
+```bash
+gws --version
+uv tool list | grep git-workspace-tui
+```
+
+查看 PyPI 最新版本：
+
+```bash
+python -m pip index versions git-workspace-tui
+```
+
+通过 gws 自己升级：
+
+```bash
+gws update
+```
+
+如果工具环境过旧，或者旧环境使用了不同 Python 解释器，可以强制重装：
+
+```bash
+gws update --force
+```
+
+对应的 `uv` 底层命令是：
 
 ```bash
 uv tool upgrade git-workspace-tui
+uv tool install --force git-workspace-tui
 ```
 
-如果你用 `pipx` 安装：
+升级已有的 `pipx` 安装：
 
 ```bash
 pipx upgrade git-workspace-tui
@@ -263,13 +289,19 @@ pipx upgrade git-workspace-tui
 安装指定 PyPI 版本：
 
 ```bash
-uv tool install 'git-workspace-tui==0.1.0'
+uv tool install 'git-workspace-tui==0.1.4'
 ```
 
 从 GitHub 安装固定版本：
 
 ```bash
-uv tool install git+https://github.com/liusheng22/git-workspace.git@v0.1.0
+uv tool install git+https://github.com/liusheng22/git-workspace.git@v0.1.4
+```
+
+PyPI 新版本发布前，也可以直接安装 GitHub 最新提交：
+
+```bash
+uv tool install --force git+https://github.com/liusheng22/git-workspace.git
 ```
 
 本地源码运行：
