@@ -11,6 +11,7 @@ from .git import git_aliases
 from .models import ExecMode, Repo, WorkspaceConfig
 
 SHELL_STARTUP_ENV = ("BASH_ENV", "ENV")
+RC_STATUS_PREFIX = "__GWS_RC_STATUS__\t"
 
 BUILTIN_GIT_ALIASES: dict[str, str] = {
     "g": "status -sb",
@@ -66,7 +67,8 @@ def _posix_shell_script(command: str, shell_name: str) -> str:
     rc_files: tuple[str, ...]
     prelude: list[str] = [
         "set +e",
-        "__gws_source_rc() { exit() { return ${1:-0}; }; . \"$1\" >/dev/null 2>&1; unset -f exit >/dev/null 2>&1 || true; }",
+        "__gws_rc_status=",
+        "__gws_source_rc() { exit() { return ${1:-0}; }; . \"$1\" >/dev/null 2>&1; __gws_rc_code=$?; unset -f exit >/dev/null 2>&1 || true; __gws_rc_status=\"${__gws_rc_status}${__gws_rc_status:+;}$1:${__gws_rc_code}\"; return 0; }",
     ]
     if shell_name == "zsh":
         prelude.append("setopt aliases >/dev/null 2>&1 || true")
@@ -81,6 +83,7 @@ def _posix_shell_script(command: str, shell_name: str) -> str:
 
     lines = [f"GWS_COMMAND={shlex.quote(command)}", *prelude]
     lines.extend(_source_if_readable(path) for path in rc_files)
+    lines.append(f'[ -n "${{GWS_REPORT_RC:-}}" ] && printf "%s\\n" "{RC_STATUS_PREFIX}${{__gws_rc_status}}"')
     lines.append("set +e")
     lines.append('eval "$GWS_COMMAND"')
     return "\n".join(lines)
@@ -198,10 +201,14 @@ def resolve_command(
     )
 
 
-def process_env(load_shell_rc: bool = False) -> dict[str, str]:
+def process_env(load_shell_rc: bool = False, report_shell_rc: bool = False) -> dict[str, str]:
     env = os.environ.copy()
     for name in SHELL_STARTUP_ENV:
         env.pop(name, None)
+    if report_shell_rc:
+        env["GWS_REPORT_RC"] = "1"
+    else:
+        env.pop("GWS_REPORT_RC", None)
     term = os.environ.get("TERM") or "xterm-256color"
     if term == "dumb":
         term = "xterm-256color"

@@ -17,7 +17,15 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import DataTable, Footer, Header, RichLog, Static, TextArea
 
-from .executor import ResolvedCommand, kill_process, process_env, resolve_command, terminate_process
+from .executor import (
+    RC_STATUS_PREFIX,
+    ResolvedCommand,
+    kill_process,
+    process_env,
+    resolve_command,
+    shell_invocation,
+    terminate_process,
+)
 from .git import repo_state
 from .models import ExecMode, Repo, Workspace
 from .styles import branch_style, shorten, status_style
@@ -47,6 +55,22 @@ class BatchCommand:
     value: str
     mode: ExecMode
     repos: tuple[Repo, ...]
+    scope: str = "ALL"
+
+
+@dataclass(frozen=True)
+class BatchResult:
+    repo: Repo
+    returncode: int
+    elapsed: float
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class FailureScope:
+    value: str
+    mode: ExecMode
+    repos: tuple[Repo, ...]
 
 
 @dataclass(frozen=True)
@@ -66,12 +90,19 @@ class LogMessage(Message):
         self.renderable = renderable
 
 
+class RcStatusMessage(Message):
+    def __init__(self, statuses: tuple[tuple[str, int], ...]) -> None:
+        super().__init__()
+        self.statuses = statuses
+
+
 class CommandFinished(Message):
-    def __init__(self, repo: Repo, returncode: int, elapsed: float) -> None:
+    def __init__(self, repo: Repo, returncode: int, elapsed: float, note: str = "") -> None:
         super().__init__()
         self.repo = repo
         self.returncode = returncode
         self.elapsed = elapsed
+        self.note = note
 
 
 class RepoTable(DataTable):
@@ -371,11 +402,20 @@ class GitWorkspace(App[None]):
         self.pending: deque[QueuedCommand] = deque()
         self.current_batch: BatchCommand | None = None
         self.current_batch_index = 0
+        self.current_batch_results: list[BatchResult] = []
         self.batch_queue: deque[BatchCommand] = deque()
+        self.last_batch_results: list[BatchResult] = []
+        self.last_failed_repos: tuple[Repo, ...] = ()
+        self.last_batch_value = ""
+        self.last_batch_mode = self.exec_mode
+        self.failure_scope: FailureScope | None = None
+        self.repo_log_positions: dict[str, int] = {}
         self.command_running = False
         self.current_process: subprocess.Popen[str] | None = None
         self.cancel_requested = False
         self.cancel_kill_delay = 0.4
+        self.rc_status_shown = False
+        self.last_rc_status: tuple[tuple[str, int], ...] = ()
         self.key_debug_enabled = os.environ.get("GWS_KEY_DEBUG") == "1"
         self.key_debug_state = KeyDebugState()
 
@@ -412,6 +452,7 @@ class GitWorkspace(App[None]):
         self.update_context()
         if not self.repos:
             self.write_log(Text("当前工作区没有发现 Git 仓库", style="bold #f85149"))
+        self.start_rc_probe()
         self.update_key_debug()
         self.focus_command_input()
         self.call_after_refresh(self.focus_command_input)
@@ -445,6 +486,8 @@ class GitWorkspace(App[None]):
 
     @property
     def selected_target(self) -> CommandTarget:
+        if self.failure_scope is not None:
+            return CommandTarget("failed")
         if self.repo_table.cursor_row <= 0:
             return CommandTarget("all")
         repo = self.selected_repo
@@ -459,6 +502,15 @@ class GitWorkspace(App[None]):
     def receive_text_input(self, text: str) -> None:
         self.focus_command_input()
         self.command_input.insert(text, maintain_selection_offset=False)
+
+    def clear_failure_scope(self) -> None:
+        self.failure_scope = None
+        self.update_context()
+
+    def failure_scope_repos(self) -> tuple[Repo, ...]:
+        if self.failure_scope is not None:
+            return self.failure_scope.repos
+        return self.last_failed_repos
 
     def set_command_text(self, value: str) -> None:
         self.command_input.load_text(value)
@@ -578,16 +630,133 @@ class GitWorkspace(App[None]):
         self.exec_log.write(renderable)
 
     def thread_write_log(self, renderable: object) -> None:
+        if isinstance(renderable, Message):
+            self.post_message(renderable)
+            return
         self.post_message(LogMessage(renderable))
 
     def on_log_message(self, message: LogMessage) -> None:
         self.write_log(message.renderable)
 
+    def on_rc_status_message(self, message: RcStatusMessage) -> None:
+        self.write_rc_status(message.statuses)
+
+    def append_shell_status(self, text: Text) -> None:
+        status = self.shell_status_text(self.last_rc_status, pending=not self.rc_status_shown)
+        text.append("  ")
+        text.append(status)
+
+    def shell_status_text(
+        self,
+        statuses: tuple[tuple[str, int], ...] | None = None,
+        pending: bool = False,
+    ) -> Text:
+        shell_name = Path(os.environ.get("SHELL") or "/bin/sh").name
+        text = Text()
+        text.append("shell: ", style="#6e7681")
+        text.append(shell_name, style="bold #58a6ff")
+        if not self.shell_rc_enabled():
+            text.append("  rc: disabled", style="#6e7681")
+            return text
+        if pending:
+            text.append("  rc: pending", style="#d29922")
+            return text
+        if not statuses:
+            text.append("  rc: none", style="#6e7681")
+            return text
+
+        loaded = [Path(path).name for path, code in statuses if code == 0]
+        failed = [Path(path).name for path, code in statuses if code != 0]
+        if loaded:
+            text.append("  rc: loaded ", style="#6e7681")
+            text.append("(" + ", ".join(loaded) + ")", style="#3fb950")
+        if failed:
+            text.append("  failed ", style="#6e7681")
+            text.append("(" + ", ".join(failed) + ")", style="#f85149")
+            text.append(" ignored", style="#6e7681")
+        return text
+
+    def parse_rc_status(self, line: str) -> tuple[tuple[str, int], ...]:
+        if not line.startswith(RC_STATUS_PREFIX):
+            return ()
+        payload = line.removeprefix(RC_STATUS_PREFIX)
+        if not payload:
+            return ()
+        items: list[tuple[str, int]] = []
+        for raw in payload.split(";"):
+            path, _, code = raw.rpartition(":")
+            if not path:
+                continue
+            try:
+                items.append((path, int(code)))
+            except ValueError:
+                items.append((path, 1))
+        return tuple(items)
+
+    def write_rc_status(self, statuses: tuple[tuple[str, int], ...]) -> None:
+        self.last_rc_status = statuses
+        if self.rc_status_shown:
+            self.update_context()
+            return
+        self.rc_status_shown = True
+        self.update_context()
+
+    def start_rc_probe(self) -> None:
+        if not self.shell_rc_enabled():
+            return
+        worker = threading.Thread(target=self.run_rc_probe_thread, daemon=True)
+        worker.start()
+
+    def run_rc_probe_thread(self) -> None:
+        try:
+            proc = subprocess.run(
+                shell_invocation(":", load_rc=True),
+                cwd=str(self.workspace.root),
+                env=process_env(load_shell_rc=True, report_shell_rc=True),
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=5,
+            )
+        except subprocess.TimeoutExpired:
+            self.thread_write_log(RcStatusMessage((("rc probe timeout", 1),)))
+            return
+        except Exception:
+            self.thread_write_log(RcStatusMessage((("rc probe failed", 1),)))
+            return
+
+        for raw in proc.stdout.splitlines():
+            if raw.startswith(RC_STATUS_PREFIX):
+                self.thread_write_log(RcStatusMessage(self.parse_rc_status(raw)))
+                return
+        self.thread_write_log(RcStatusMessage(()))
+
     def on_command_finished(self, message: CommandFinished) -> None:
-        self.finish_command(message.repo, message.returncode, message.elapsed)
+        self.finish_command(message.repo, message.returncode, message.elapsed, message.note)
 
     def update_context(self) -> None:
         target = self.selected_target
+        if target.scope == "failed":
+            repos = self.failure_scope_repos()
+            title = Text()
+            title.append("FAILED", style="bold #f85149")
+            title.append(f"  {len(repos)} repos", style="bold #8b949e")
+            if self.command_running:
+                title.append("  running", style="bold #d29922")
+            elif self.batch_queue or self.pending or self.current_batch is not None:
+                queued = len(self.pending) + len(self.batch_queue)
+                title.append(f"  queued:{queued}", style="bold #d29922")
+            self.append_shell_status(title)
+            self.query_one("#exec-title", Static).update(title)
+
+            prompt = Text()
+            prompt.append("FAILED", style="bold #f85149")
+            prompt.append(f" {self.exec_mode.value} ›", style="bold #3fb950")
+            self.prompt.update(prompt)
+            return
+
         if target.is_all:
             title = Text()
             title.append("ALL", style="bold #58a6ff")
@@ -597,6 +766,7 @@ class GitWorkspace(App[None]):
             elif self.batch_queue or self.pending or self.current_batch is not None:
                 queued = len(self.pending) + len(self.batch_queue)
                 title.append(f"  queued:{queued}", style="bold #d29922")
+            self.append_shell_status(title)
             self.query_one("#exec-title", Static).update(title)
 
             prompt = Text()
@@ -621,6 +791,7 @@ class GitWorkspace(App[None]):
             title.append("  running", style="bold #d29922")
         elif self.pending:
             title.append(f"  queued:{len(self.pending)}", style="bold #d29922")
+        self.append_shell_status(title)
         self.query_one("#exec-title", Static).update(title)
 
         prompt = Text()
@@ -632,10 +803,13 @@ class GitWorkspace(App[None]):
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table is self.repo_table:
+            self.failure_scope = None
             self.update_context()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table is self.repo_table:
+            self.failure_scope = None
+            self.update_context()
             self.focus_command_input()
 
     def on_key(self, event: events.Key) -> None:
@@ -711,6 +885,11 @@ class GitWorkspace(App[None]):
 
         if self.command_running:
             target = self.selected_target
+            if target.scope == "failed":
+                repos = self.failure_scope_repos()
+                self.queue_scoped_command("FAILED", value, self.exec_mode, repos)
+                self.update_context()
+                return
             if target.is_all:
                 self.queue_workspace_command(value, self.exec_mode)
                 self.update_context()
@@ -723,6 +902,10 @@ class GitWorkspace(App[None]):
             self.update_context()
             return
         target = self.selected_target
+        if target.scope == "failed":
+            repos = self.failure_scope_repos()
+            self.start_scoped_command("FAILED", value, self.exec_mode, repos)
+            return
         if target.is_all:
             self.start_workspace_command(value, self.exec_mode)
             return
@@ -753,11 +936,52 @@ class GitWorkspace(App[None]):
             self.update_context()
             self.focus_command_input()
             return True
+        if value in {":all", "all"}:
+            self.failure_scope = None
+            self.repo_table.move_cursor(row=0, column=0, scroll=True)
+            self.write_log(Text("target: ALL", style="bold #58a6ff"))
+            self.update_context()
+            self.focus_command_input()
+            return True
         if value == ":keys":
             self.key_debug_enabled = not self.key_debug_enabled
             state = "on" if self.key_debug_enabled else "off"
             self.write_log(Text(f"key debug: {state}", style="bold #d29922"))
             self.update_key_debug()
+            self.focus_command_input()
+            return True
+        if value in {":summary", "summary"}:
+            self.write_batch_summary(self.last_batch_results, "last batch")
+            self.focus_command_input()
+            return True
+        if value in {":failed", "failed"}:
+            self.activate_failed_scope()
+            self.focus_command_input()
+            return True
+        if value in {":retry-failed", "retry-failed"}:
+            self.retry_failed_repos()
+            self.focus_command_input()
+            return True
+        if value in {":copy-failed", "copy-failed"}:
+            self.copy_failed_summary()
+            self.focus_command_input()
+            return True
+        if value in {":clear-summary", "clear-summary"}:
+            self.last_batch_results = []
+            self.last_failed_repos = ()
+            self.failure_scope = None
+            self.write_log(Text("summary cleared", style="#6e7681"))
+            self.update_context()
+            self.focus_command_input()
+            return True
+        if value.startswith(":jump ") or value.startswith("jump "):
+            _, _, target = value.partition(" ")
+            self.jump_to_repo_output(target.strip())
+            self.focus_command_input()
+            return True
+        if value.startswith(":failed-run ") or value.startswith("failed-run "):
+            _, _, command = value.partition(" ")
+            self.run_failed_command(command.strip())
             self.focus_command_input()
             return True
         return False
@@ -776,6 +1000,7 @@ class GitWorkspace(App[None]):
         context.append(repo.name, style="bold #58a6ff")
         context.append(" @ ", style="#6e7681")
         context.append(state.branch, style=branch_style(state.branch))
+        self.repo_log_positions[repo.key] = len(self.exec_log.lines)
         self.write_log(context)
 
         line = Text(f"{mode.value} › ", style="bold #3fb950")
@@ -806,36 +1031,203 @@ class GitWorkspace(App[None]):
 
     def start_workspace_command(self, value: str, mode: ExecMode) -> None:
         repos = self.candidate_repos_for_workspace_command(value)
+        self.start_scoped_command("ALL", value, mode, tuple(repos))
+
+    def start_scoped_command(
+        self,
+        scope_name: str,
+        value: str,
+        mode: ExecMode,
+        repos: tuple[Repo, ...],
+    ) -> None:
         if not repos:
-            self.write_log(Text("当前工作区没有发现 Git 仓库", style="bold #f85149"))
+            self.write_log(Text(f"{scope_name}: no repositories", style="bold #f85149"))
             return
-        batch = BatchCommand(value, mode, tuple(repos))
+        batch = BatchCommand(value, mode, tuple(repos), scope_name)
         if self.command_running or self.current_batch is not None:
             self.batch_queue.append(batch)
-            self.write_log(Text(f"queued: ALL {mode.value} › {value}", style="#d29922"))
+            self.write_log(Text(f"queued: {scope_name} {mode.value} › {value}", style="#d29922"))
             self.update_context()
             return
         self.current_batch = batch
         self.current_batch_index = 0
-        self.write_log(Text(f"scope: ALL ({len(repos)} repos)", style="bold #58a6ff"))
+        self.current_batch_results = []
+        self.last_batch_value = batch.value
+        self.last_batch_mode = batch.mode
+        self.write_log(Text(f"scope: {scope_name} ({len(repos)} repos)", style="bold #58a6ff"))
         self.update_context()
         self.start_command(batch.repos[0], batch.value, batch.mode)
 
     def queue_workspace_command(self, value: str, mode: ExecMode) -> None:
         repos = self.candidate_repos_for_workspace_command(value)
+        self.queue_scoped_command("ALL", value, mode, tuple(repos))
+
+    def queue_scoped_command(
+        self,
+        scope_name: str,
+        value: str,
+        mode: ExecMode,
+        repos: tuple[Repo, ...],
+    ) -> None:
         if not repos:
             return
-        self.batch_queue.append(BatchCommand(value, mode, tuple(repos)))
-        self.write_log(Text(f"queued: ALL {mode.value} › {value}", style="#d29922"))
+        self.batch_queue.append(BatchCommand(value, mode, repos, scope_name))
+        self.write_log(Text(f"queued: {scope_name} {mode.value} › {value}", style="#d29922"))
+
+    def result_note(self, returncode: int) -> str:
+        if returncode == 0:
+            return ""
+        if returncode in {-signal.SIGTERM, -signal.SIGKILL}:
+            return "canceled"
+        return f"exit {returncode}"
+
+    def output_note(self, output_tail: list[str], returncode: int) -> str:
+        if returncode == 0:
+            return ""
+        for line in reversed(output_tail):
+            clean = line.strip()
+            if clean:
+                return shorten(clean, 72)
+        return self.result_note(returncode)
+
+    def format_batch_summary(self, results: list[BatchResult], title: str) -> str:
+        if not results:
+            return "no ALL summary yet"
+        failures = [result for result in results if result.returncode != 0]
+        lines = [
+            f"{title} completed  ok:{len(results) - len(failures)}  failed:{len(failures)}",
+            f"{'repo':<22} {'status':<8} {'time':>7}  note",
+        ]
+        for result in results:
+            status = "ok" if result.returncode == 0 else "failed"
+            lines.append(
+                f"{shorten(result.repo.name, 22):<22} "
+                f"{status:<8} {result.elapsed:>6.1f}s  {result.note or '-'}"
+            )
+        return "\n".join(lines)
+
+    def write_batch_summary(self, results: list[BatchResult], title: str) -> None:
+        if not results:
+            self.write_log(Text("no ALL summary yet", style="#6e7681"))
+            return
+        failures = [result for result in results if result.returncode != 0]
+        header = Text("\n")
+        header.append(f"{title} completed", style="bold #58a6ff")
+        header.append(f"  ok:{len(results) - len(failures)}", style="bold #3fb950")
+        if failures:
+            header.append(f"  failed:{len(failures)}", style="bold #f85149")
+            header.append(
+                "  actions: :failed  :retry-failed  :copy-failed  :jump <repo>  :clear-summary",
+                style="#6e7681",
+            )
+        self.write_log(header)
+
+        table = Text()
+        table.append(f"{'repo':<22} {'status':<8} {'time':>7}  note\n", style="#6e7681")
+        for result in results:
+            ok = result.returncode == 0
+            status = "ok" if ok else "failed"
+            style = "#3fb950" if ok else "#f85149"
+            table.append(f"{shorten(result.repo.name, 22):<22} ", style="bold #e6edf3")
+            table.append(f"{status:<8}", style=f"bold {style}")
+            table.append(f" {result.elapsed:>6.1f}s  ", style="#8b949e")
+            table.append(result.note or "-", style="#8b949e" if ok else "#f85149")
+            table.append("\n")
+        self.write_log(table)
+
+    def write_failed_summary(self) -> None:
+        failures = [result for result in self.last_batch_results if result.returncode != 0]
+        if not failures:
+            self.write_log(Text("no failed repos in last ALL command", style="#3fb950"))
+            return
+        self.write_batch_summary(failures, "failed repos")
+
+    def activate_failed_scope(self) -> None:
+        failures = [result for result in self.last_batch_results if result.returncode != 0]
+        if not failures:
+            self.failure_scope = None
+            self.write_log(Text("no failed repos in last ALL command", style="#3fb950"))
+            self.update_context()
+            return
+        repos = tuple(result.repo for result in failures)
+        self.last_failed_repos = repos
+        self.failure_scope = FailureScope(self.last_batch_value, self.last_batch_mode, repos)
+        self.write_failed_summary()
+        self.write_log(
+            Text(
+                f"target: FAILED ({len(repos)} repos). Next command runs only on failed repos.",
+                style="bold #f85149",
+            )
+        )
+        self.update_context()
+
+    def copy_failed_summary(self) -> None:
+        failures = [result for result in self.last_batch_results if result.returncode != 0]
+        if not failures:
+            self.write_log(Text("no failed repos to copy", style="#3fb950"))
+            return
+        text = self.format_batch_summary(failures, "failed repos")
+        self.copy_to_clipboard(text)
+        self.write_log(Text(f"copied failed summary ({len(failures)} repos)", style="bold #3fb950"))
+
+    def run_failed_command(self, value: str) -> None:
+        if not value:
+            self.write_log(Text("failed-run requires a command", style="bold #f85149"))
+            return
+        failures = self.failure_scope_repos()
+        if not failures:
+            self.write_log(Text("no failed repos to run", style="#3fb950"))
+            return
+        self.start_scoped_command("FAILED", value, self.exec_mode, failures)
+
+    def jump_to_repo_output(self, value: str) -> None:
+        if not value:
+            self.write_log(Text("jump requires a repo name", style="bold #f85149"))
+            return
+        needle = value.lower()
+        matches = [repo for repo in self.repos if repo.name.lower() == needle]
+        if not matches:
+            matches = [repo for repo in self.repos if needle in repo.name.lower()]
+        if not matches:
+            self.write_log(Text(f"repo not found: {value}", style="bold #f85149"))
+            return
+        repo = matches[0]
+        row_index = self.repos.index(repo) + 1
+        self.failure_scope = None
+        self.repo_table.move_cursor(row=row_index, column=0, scroll=True)
+        self.write_log(Text(f"jumped to {repo.name}", style="bold #58a6ff"))
+        position = self.repo_log_positions.get(repo.key)
+        if position is not None:
+            self.exec_log.scroll_to(y=position, animate=False, force=True)
+        self.update_context()
+
+    def retry_failed_repos(self) -> None:
+        failures = [result.repo for result in self.last_batch_results if result.returncode != 0]
+        if not failures:
+            self.write_log(Text("no failed repos to retry", style="#3fb950"))
+            return
+        if self.last_batch_value:
+            self.start_scoped_command(
+                "FAILED retry",
+                self.last_batch_value,
+                self.last_batch_mode,
+                tuple(failures),
+            )
+            return
+        self.write_log(Text("retry unavailable", style="#f85149"))
 
     def run_command_thread(self, repo: Repo, resolved: ResolvedCommand) -> None:
         started = time.monotonic()
         returncode = 1
+        output_tail: list[str] = []
         try:
             proc = subprocess.Popen(
                 resolved.args,
                 cwd=str(resolved.cwd),
-                env=process_env(load_shell_rc=self.shell_rc_enabled()),
+                env=process_env(
+                    load_shell_rc=self.shell_rc_enabled(),
+                    report_shell_rc=resolved.shell_mode and self.shell_rc_enabled(),
+                ),
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -849,8 +1241,14 @@ class GitWorkspace(App[None]):
             assert proc.stdout is not None
             for raw in proc.stdout:
                 line = raw.rstrip("\n")
+                if line.startswith(RC_STATUS_PREFIX):
+                    self.thread_write_log(RcStatusMessage(self.parse_rc_status(line)))
+                    continue
                 if line:
-                    self.thread_write_log(line.replace("\r", "\n"))
+                    display_line = line.replace("\r", "\n")
+                    output_tail.extend(part for part in display_line.splitlines() if part.strip())
+                    output_tail = output_tail[-8:]
+                    self.thread_write_log(display_line)
             returncode = proc.wait()
         except FileNotFoundError as exc:
             self.thread_write_log(Text(f"命令不存在：{exc}", style="bold #f85149"))
@@ -860,13 +1258,17 @@ class GitWorkspace(App[None]):
             returncode = 1
         finally:
             elapsed = time.monotonic() - started
-            self.post_message(CommandFinished(repo, returncode, elapsed))
+            self.post_message(CommandFinished(repo, returncode, elapsed, self.output_note(output_tail, returncode)))
 
     def shell_rc_enabled(self) -> bool:
         return self.workspace.config.exec_settings.load_shell_rc is not False
 
-    def finish_command(self, repo: Repo, returncode: int, elapsed: float) -> None:
+    def finish_command(self, repo: Repo, returncode: int, elapsed: float, note: str = "") -> None:
         canceled = self.cancel_requested or returncode in {-signal.SIGTERM, -signal.SIGKILL}
+        if self.current_batch is not None:
+            self.current_batch_results.append(
+                BatchResult(repo, returncode, elapsed, note or self.result_note(returncode))
+            )
         self.command_running = False
         self.current_process = None
         self.cancel_requested = False
@@ -900,15 +1302,31 @@ class GitWorkspace(App[None]):
                     batch.mode,
                 )
                 return
-            self.write_log(Text(f"ALL completed  ({len(batch.repos)} repos)", style="bold #3fb950"))
+            self.write_log(Text(f"{batch.scope} completed  ({len(batch.repos)} repos)", style="bold #3fb950"))
+            self.last_batch_results = list(self.current_batch_results)
+            self.last_failed_repos = tuple(
+                result.repo for result in self.last_batch_results if result.returncode != 0
+            )
+            if self.last_failed_repos and batch.scope.startswith("FAILED"):
+                self.failure_scope = FailureScope(batch.value, batch.mode, self.last_failed_repos)
+            elif not self.last_failed_repos:
+                self.failure_scope = None
+            self.write_batch_summary(
+                self.last_batch_results,
+                f"{batch.scope} {batch.mode.value} › {batch.value}",
+            )
             self.current_batch = None
             self.current_batch_index = 0
+            self.current_batch_results = []
             self.update_context()
         if self.batch_queue:
             batch = self.batch_queue.popleft()
             self.current_batch = batch
             self.current_batch_index = 0
-            self.write_log(Text(f"scope: ALL ({len(batch.repos)} repos)", style="bold #58a6ff"))
+            self.current_batch_results = []
+            self.last_batch_value = batch.value
+            self.last_batch_mode = batch.mode
+            self.write_log(Text(f"scope: {batch.scope} ({len(batch.repos)} repos)", style="bold #58a6ff"))
             self.update_context()
             self.start_command(batch.repos[0], batch.value, batch.mode)
 
@@ -959,6 +1377,7 @@ class GitWorkspace(App[None]):
         total_rows = len(self.repos) + 1
         if total_rows <= 0:
             return
+        self.failure_scope = None
         next_row = (self.repo_table.cursor_row + delta) % total_rows
         self.repo_table.move_cursor(row=next_row, column=0, scroll=True)
         self.update_context()
@@ -983,6 +1402,7 @@ class GitWorkspace(App[None]):
         self.pending.clear()
         self.current_batch = None
         self.current_batch_index = 0
+        self.current_batch_results = []
         self.batch_queue.clear()
         terminate_process(proc)
         self.set_timer(self.cancel_kill_delay, lambda: self.kill_if_still_running(proc))

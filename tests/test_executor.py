@@ -9,7 +9,7 @@ import pytest
 from conftest import init_repo
 
 from git_workspace.config import load_config
-from git_workspace.executor import process_env, resolve_command, shell_invocation
+from git_workspace.executor import RC_STATUS_PREFIX, process_env, resolve_command, shell_invocation
 from git_workspace.models import ExecMode, Repo
 
 
@@ -246,6 +246,37 @@ alias __gws_alias_noise_test__='echo alias-ok'
 
     assert proc.stdout.strip() == "alias-ok"
     assert proc.stderr == ""
+
+
+def test_shell_invocation_reports_rc_status_when_requested(tmp_path: Path, monkeypatch) -> None:
+    repo_path = init_repo(tmp_path / "api")
+    home = tmp_path / "home"
+    home.mkdir()
+    shell = shutil.which("zsh")
+    rc_file = ".zshrc"
+    if shell is None:
+        shell = shutil.which("bash")
+        rc_file = ".bashrc"
+    if shell is None:
+        pytest.skip("requires zsh or bash")
+
+    (home / rc_file).write_text("alias __gws_status_test__='echo ok'\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("SHELL", shell)
+
+    proc = subprocess.run(
+        shell_invocation("__gws_status_test__", load_rc=True),
+        cwd=str(repo_path),
+        env=process_env(load_shell_rc=True, report_shell_rc=True),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    lines = proc.stdout.splitlines()
+    assert lines[0].startswith(RC_STATUS_PREFIX)
+    assert f"{home / rc_file}:0" in lines[0]
+    assert lines[-1] == "ok"
 
 
 @pytest.mark.parametrize("rc_body", ["exit 42\n", "return 33\n", "if then\n"])

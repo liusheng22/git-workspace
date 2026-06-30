@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Hardens PyPI publishing so tag releases run the full CI matrix before upload.
+- Adds actionable TUI batch summaries for multi-repo commands, including failed-repo targeting, retry, copy, and jump actions.
+- Shows shell rc loading status once in the TUI and keeps rc failures non-blocking.
+
 ## 0.1.3
 
 - Stabilizes the TUI all-repository cancellation test on Linux CI while keeping the 0.1.2 cancellation behavior.

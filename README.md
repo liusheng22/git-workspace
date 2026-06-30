@@ -56,6 +56,18 @@ Useful keys:
 | `:git` / `:shell` | Switch execution mode. |
 | `:clear` / `:refresh` | Clear log / refresh repos. |
 
+Useful TUI commands:
+
+| Command | Action |
+| --- | --- |
+| `:summary` | Reprint the latest batch result summary. |
+| `:failed` | Show failed repos and make the next command target only those repos. |
+| `:retry-failed` | Run the previous command again only in failed repos. |
+| `:copy-failed` | Copy the failed-repo summary to the clipboard. |
+| `:jump <repo>` | Select a repo and scroll back to its latest output. |
+| `:all` | Return the target to `ALL REPOS`. |
+| `:clear-summary` | Clear the latest batch summary and failed-repo target. |
+
 ## ALL REPOS vs One Repo
 
 ![Target model](docs/target-model.svg)
@@ -74,6 +86,28 @@ Repository rows are for focused work:
 api@main shell > pnpm test
 api@main shell > git checkout dev
 api@dev shell > git pull --ff-only
+```
+
+After an `ALL REPOS` command finishes, Git Workspace prints a summary so you can decide what to do next without reading the whole log:
+
+```text
+ALL shell > git pull --ff-only completed  ok:3  failed:2
+repo                   status      time  note
+api                    ok          1.2s  -
+web                    failed      0.4s  local changes
+server                 ok          2.8s  -
+boss                   failed      1.1s  conflict
+```
+
+The summary is actionable:
+
+```text
+:failed        # show failures and make the next command run only there
+git status -sb # runs only in failed repos after :failed
+:retry-failed  # rerun the previous ALL command only in failed repos
+:copy-failed   # copy a compact failure report
+:jump web      # select web and scroll to its latest output
+:all           # return to ALL REPOS
 ```
 
 ## Command Flow
@@ -97,6 +131,18 @@ api@main git > gco dev
 ```
 
 Inside the TUI, Git Workspace runs shell commands through a child shell that loads common rc files such as `.zshrc` or `.bashrc`. This keeps local aliases and functions available while keeping the loading scoped to the TUI child process, not your existing terminal tabs. If an rc file has errors, Git Workspace ignores the rc failure and continues running the command. Portable team shortcuts should still go in `workspace.yml` or Git's own `alias.*` config.
+
+The TUI shows the shell rc status once, near the first shell command output:
+
+```text
+shell: zsh  rc: loaded (.zshenv, .zprofile, .zshrc)
+```
+
+If a startup file fails, the TUI keeps running and shows the ignored file:
+
+```text
+shell: zsh  rc: loaded (.zshenv)  failed (.zshrc) ignored
+```
 
 CLI commands such as `gws exec` do not load shell rc files by default. To force one behavior for a workspace, configure it explicitly:
 
@@ -257,6 +303,10 @@ When in doubt:
 gws status
 gws plan
 ```
+
+## Release Gate
+
+PyPI publishing is guarded by the same matrix as CI: Ubuntu and macOS on Python 3.11, 3.12, and 3.13. The publish job runs only after every matrix job passes, then builds the package and publishes through PyPI Trusted Publishing.
 
 ## Development
 

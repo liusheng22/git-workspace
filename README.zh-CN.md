@@ -56,6 +56,18 @@ api@main shell > pnpm test
 | `:git` / `:shell` | 切换 Git 模式 / shell 模式。 |
 | `:clear` / `:refresh` | 清空日志 / 刷新仓库状态。 |
 
+常用 TUI 命令：
+
+| 命令 | 作用 |
+| --- | --- |
+| `:summary` | 重新显示最近一次批量执行结果摘要。 |
+| `:failed` | 查看失败仓库，并让下一条命令只在失败仓库里执行。 |
+| `:retry-failed` | 只在失败仓库里重跑上一条批量命令。 |
+| `:copy-failed` | 复制失败摘要。 |
+| `:jump <repo>` | 选中某个仓库，并跳回它最近一次输出的位置。 |
+| `:all` | 回到 `ALL REPOS` 目标。 |
+| `:clear-summary` | 清空最近一次批量摘要和失败仓库目标。 |
+
 ## ALL REPOS 和单仓库
 
 ![执行目标模型](docs/target-model.zh-CN.svg)
@@ -74,6 +86,28 @@ ALL shell > git push
 api@main shell > pnpm test
 api@main shell > git checkout dev
 api@dev shell > git pull --ff-only
+```
+
+每次 `ALL REPOS` 执行完成后，Git Workspace 会输出结果摘要，让你不用从整段日志里手动找失败原因：
+
+```text
+ALL shell > git pull --ff-only completed  ok:3  failed:2
+repo                   status      time  note
+api                    ok          1.2s  -
+web                    failed      0.4s  local changes
+server                 ok          2.8s  -
+boss                   failed      1.1s  conflict
+```
+
+摘要不是纯展示，它可以继续操作：
+
+```text
+:failed        # 查看失败仓库，并把下一条命令只发给失败仓库
+git status -sb # 执行过 :failed 后，这条只会在失败仓库里跑
+:retry-failed  # 只在失败仓库里重跑上一条 ALL 命令
+:copy-failed   # 复制失败摘要
+:jump web      # 选中 web，并跳回它最近一次输出
+:all           # 回到 ALL REPOS
 ```
 
 ## 命令是怎么执行的
@@ -97,6 +131,18 @@ api@main git > gco dev
 ```
 
 在 TUI 里，Git Workspace 会通过一个子 shell 执行命令，并加载常见的 rc 文件，比如 `.zshrc` 或 `.bashrc`。这样本机 alias / function 可以继续使用，但加载范围限制在 TUI 的子进程里，不会去控制你已经打开的其它终端。如果 rc 文件有错误，Git Workspace 会忽略 rc 加载失败并继续执行命令。团队共享的快捷命令仍然建议放到 `workspace.yml` 或 Git 自己的 `alias.*` 配置里。
+
+TUI 会在第一次 shell 命令附近轻量显示一次 rc 加载状态：
+
+```text
+shell: zsh  rc: loaded (.zshenv, .zprofile, .zshrc)
+```
+
+如果某个启动文件失败，TUI 不会退出，会标出失败文件并继续执行命令：
+
+```text
+shell: zsh  rc: loaded (.zshenv)  failed (.zshrc) ignored
+```
 
 CLI 命令，比如 `gws exec`，默认不会加载 shell rc 文件。如果你想对某个工作区强制指定行为，可以显式配置：
 
@@ -257,6 +303,10 @@ g plan
 gws status
 gws plan
 ```
+
+## 发布门禁
+
+PyPI 发布会先跑和 CI 相同的矩阵：Ubuntu、macOS，Python 3.11、3.12、3.13。只有所有矩阵任务都通过后，publish job 才会构建包并通过 PyPI Trusted Publishing 发布。
 
 ## 开发
 

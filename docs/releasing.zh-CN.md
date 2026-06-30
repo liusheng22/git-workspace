@@ -64,21 +64,22 @@ git push origin main
 ```
 
 9. 等待 `main` 上的 `CI` workflow 通过。
-10. 创建并推送版本 tag：
+10. 确认 `.github/workflows/publish.yml` 仍然会在发布前跑完整 CI 矩阵：Ubuntu、macOS，Python 3.11、3.12、3.13。`publish` job 必须保留 `needs: test`。
+11. 创建并推送版本 tag：
 
 ```bash
 git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-11. 观察 tag 触发的 CI 和 Publish：
+12. 观察 tag 触发的 CI 和 Publish。只有 publish workflow 的所有矩阵任务都绿了，才允许上传 PyPI：
 
 ```bash
 gh run list --repo liusheng22/git-workspace --limit 10
 gh run watch <publish-run-id> --repo liusheng22/git-workspace --exit-status
 ```
 
-12. 验证 PyPI：
+13. 验证 PyPI：
 
 ```bash
 python - <<'PY'
@@ -93,7 +94,7 @@ print(data['info']['package_url'])
 PY
 ```
 
-13. 在干净工具环境验证安装：
+14. 在干净工具环境验证安装：
 
 ```bash
 uv tool install --force git-workspace-tui

@@ -64,21 +64,22 @@ git push origin main
 ```
 
 9. Wait for the `CI` workflow on `main` to pass.
-10. Create and push the version tag:
+10. Confirm `.github/workflows/publish.yml` still runs the full CI matrix before publish: Ubuntu and macOS on Python 3.11, 3.12, and 3.13. The `publish` job must keep `needs: test`.
+11. Create and push the version tag:
 
 ```bash
 git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-11. Watch both workflows on the tag:
+12. Watch both workflows on the tag. PyPI upload must happen only after every publish workflow matrix job is green:
 
 ```bash
 gh run list --repo liusheng22/git-workspace --limit 10
 gh run watch <publish-run-id> --repo liusheng22/git-workspace --exit-status
 ```
 
-12. Verify PyPI:
+13. Verify PyPI:
 
 ```bash
 python - <<'PY'
@@ -93,7 +94,7 @@ print(data['info']['package_url'])
 PY
 ```
 
-13. Verify install in a clean tool environment:
+14. Verify install in a clean tool environment:
 
 ```bash
 uv tool install --force git-workspace-tui

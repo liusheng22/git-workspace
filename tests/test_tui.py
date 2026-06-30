@@ -10,7 +10,14 @@ from textual.widgets import Static
 from textual.widgets._header import HeaderClock, HeaderIcon
 
 from git_workspace.models import ExecMode
-from git_workspace.tui import BatchCommand, CommandInput, GitWorkspace, RepoTable
+from git_workspace.tui import (
+    BatchCommand,
+    BatchResult,
+    CommandInput,
+    GitWorkspace,
+    RcStatusMessage,
+    RepoTable,
+)
 
 
 async def _make_app(tmp_path: Path) -> GitWorkspace:
@@ -71,7 +78,10 @@ def test_tui_repo_context_shows_branch_label(tmp_path: Path) -> None:
             await pilot.press("tab")
             await pilot.pause(0.1)
             title = app.query_one("#exec-title", Static)
-            assert title.render().plain == "SHELL api  branch main  clean"
+            title_text = title.render().plain
+            assert "SHELL api  branch main  clean" in title_text
+            assert "shell:" in title_text
+            assert "rc:" in title_text
             app.exit()
 
     asyncio.run(run())
@@ -281,6 +291,25 @@ def test_tui_mount_has_no_ready_noise(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
+def test_tui_starts_rc_probe_on_mount(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        called = False
+
+        def fake_start_rc_probe() -> None:
+            nonlocal called
+            called = True
+
+        app.start_rc_probe = fake_start_rc_probe  # type: ignore[method-assign]
+
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            assert called
+            app.exit()
+
+    asyncio.run(run())
+
+
 def test_tui_header_does_not_refresh_clock(tmp_path: Path) -> None:
     async def run() -> None:
         app = await _make_app(tmp_path)
@@ -389,6 +418,243 @@ def test_tui_all_scope_copies_whole_batch_and_runs_first_repo(tmp_path: Path) ->
             assert "web" in text
             assert "web.txt" in text
             assert "ALL completed  (2 repos)" in text
+            assert "ALL git › status --short completed" in text
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_batch_summary_records_failures_and_actions(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            app.last_batch_results = [
+                BatchResult(app.repos[0], 0, 1.2, ""),
+                BatchResult(app.repos[1], 1, 0.4, "exit 1"),
+            ]
+
+            app.write_batch_summary(app.last_batch_results, "ALL shell › git pull")
+            text = str(app.exec_log.lines)
+
+            assert "ALL shell › git pull completed" in text
+            assert "ok:1" in text
+            assert "failed:1" in text
+            assert ":failed" in text
+            assert ":retry-failed" in text
+            assert ":copy-failed" in text
+            assert ":jump <repo>" in text
+            assert app.repos[0].name in text
+            assert app.repos[1].name in text
+            assert "exit 1" in text
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_failed_summary_and_retry_failed(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        started: list[tuple[str, tuple[str, ...], ExecMode]] = []
+
+        def fake_start_command(repo, value: str, mode: ExecMode) -> None:
+            assert app.current_batch is not None
+            started.append((value, tuple(item.name for item in app.current_batch.repos), mode))
+
+        app.start_command = fake_start_command  # type: ignore[method-assign]
+
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            app.last_batch_value = "git pull"
+            app.last_batch_mode = ExecMode.SHELL
+            app.last_batch_results = [
+                BatchResult(app.repos[0], 0, 1.2, ""),
+                BatchResult(app.repos[1], 1, 0.4, "exit 1"),
+            ]
+
+            app.write_failed_summary()
+            app.retry_failed_repos()
+
+            text = str(app.exec_log.lines)
+            assert "failed repos completed" in text
+            assert app.repos[1].name in text
+            assert started == [("git pull", (app.repos[1].name,), ExecMode.SHELL)]
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_queued_failed_retry_keeps_failed_scope_label(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            app.command_running = True
+            app.last_batch_value = "git pull"
+            app.last_batch_mode = ExecMode.SHELL
+            app.last_batch_results = [BatchResult(app.repos[1], 1, 0.4, "conflict")]
+
+            app.retry_failed_repos()
+
+            assert len(app.batch_queue) == 1
+            queued = app.batch_queue[0]
+            assert queued.scope == "FAILED retry"
+            assert tuple(repo.name for repo in queued.repos) == (app.repos[1].name,)
+            text = str(app.exec_log.lines)
+            assert "queued: FAILED retry shell › git pull" in text
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_failed_scope_runs_next_command_only_on_failed_repos(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        started: list[tuple[str, tuple[str, ...], ExecMode]] = []
+
+        def fake_start_command(repo, value: str, mode: ExecMode) -> None:
+            assert app.current_batch is not None
+            started.append((value, tuple(item.name for item in app.current_batch.repos), mode))
+
+        app.start_command = fake_start_command  # type: ignore[method-assign]
+
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            app.last_batch_value = "git pull"
+            app.last_batch_mode = ExecMode.SHELL
+            app.last_batch_results = [
+                BatchResult(app.repos[0], 0, 1.2, ""),
+                BatchResult(app.repos[1], 1, 0.4, "local changes"),
+            ]
+
+            app.activate_failed_scope()
+            assert app.selected_target.scope == "failed"
+
+            app.submit_command("git status -sb")
+
+            assert started == [("git status -sb", (app.repos[1].name,), ExecMode.SHELL)]
+            assert app.current_batch is not None
+            assert app.current_batch.scope == "FAILED"
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_all_failures_do_not_implicitly_change_target(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            app.current_batch = BatchCommand("git pull", ExecMode.SHELL, tuple(app.repos), "ALL")
+            app.current_batch_index = len(app.repos) - 1
+            app.current_batch_results = [BatchResult(app.repos[0], 1, 0.4, "conflict")]
+
+            app.run_next_queued()
+
+            assert app.last_failed_repos == (app.repos[0],)
+            assert app.failure_scope is None
+            assert app.selected_target.is_all
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_copy_failed_summary_to_clipboard(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            app.last_batch_results = [
+                BatchResult(app.repos[0], 0, 1.2, ""),
+                BatchResult(app.repos[1], 1, 0.4, "conflict"),
+            ]
+
+            app.copy_failed_summary()
+
+            assert "failed repos completed" in app.clipboard
+            assert app.repos[1].name in app.clipboard
+            assert "conflict" in app.clipboard
+            assert app.repos[0].name not in app.clipboard
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_jump_to_repo_output_selects_repo_and_scrolls(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        async with app.run_test(size=(120, 12)):
+            await asyncio.sleep(0.5)
+            for index in range(40):
+                app.write_log(f"line {index}")
+            app.repo_log_positions[app.repos[1].key] = 25
+
+            app.jump_to_repo_output(app.repos[1].name)
+
+            assert app.repo_table.cursor_row == 2
+            assert app.failure_scope is None
+            assert app.exec_log.scroll_y >= 20
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_thread_write_log_dispatches_rc_status_message(tmp_path: Path) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            app.thread_write_log(RcStatusMessage((("/Users/me/.zshrc", 0),)))
+            await asyncio.sleep(0.2)
+
+            title = app.query_one("#exec-title", Static).render().plain
+            assert "shell:" in title
+            assert ".zshrc" in title
+            assert "shell:" not in str(app.exec_log.lines)
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_title_shows_shell_status_pending_and_loaded(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        app.start_rc_probe = lambda: None  # type: ignore[method-assign]
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+
+            title = app.query_one("#exec-title", Static)
+            assert "shell: zsh  rc: pending" in title.render().plain
+
+            app.write_rc_status((("/Users/me/.zshenv", 0), ("/Users/me/.zshrc", 1)))
+
+            status = title.render().plain
+            assert "shell: zsh" in status
+            assert "loaded (.zshenv)" in status
+            assert "failed (.zshrc) ignored" in status
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_tui_rc_status_updates_title_without_log_noise(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        app = await _make_app(tmp_path)
+        app.start_rc_probe = lambda: None  # type: ignore[method-assign]
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+        async with app.run_test(size=(120, 32)):
+            await asyncio.sleep(0.5)
+            app.write_rc_status((("/Users/me/.zshenv", 0), ("/Users/me/.zshrc", 1)))
+            app.write_rc_status((("/Users/me/.zshenv", 0),))
+
+            text = app.query_one("#exec-title", Static).render().plain
+            assert "shell:" in text
+            assert "zsh" in text
+            assert "loaded" in text
+            assert ".zshenv" in text
+            assert text.count("shell:") == 1
+            assert "shell:" not in str(app.exec_log.lines)
             app.exit()
 
     asyncio.run(run())
